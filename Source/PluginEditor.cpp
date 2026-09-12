@@ -22,9 +22,13 @@ PluginBridgeAudioProcessorEditor::PluginBridgeAudioProcessorEditor(PluginBridgeA
 
     // Subtitle label
     addAndMakeVisible(subtitleLabel_);
-    subtitleLabel_.setText("OMNIBUS LAN AUDIO BUS", juce::dontSendNotification);
+#ifdef JucePlugin_VersionString
+    subtitleLabel_.setText("OMNIBUS LAN AUDIO BUS • v" + juce::String(JucePlugin_VersionString), juce::dontSendNotification);
+#else
+    subtitleLabel_.setText("OMNIBUS LAN AUDIO BUS • v1.0.4", juce::dontSendNotification);
+#endif
     subtitleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(9.0f).withStyle("Bold")));
-    subtitleLabel_.setColour(juce::Label::textColourId, OmniLookAndFeel::getAccentCyan().withAlpha(0.8f));
+    subtitleLabel_.setColour(juce::Label::textColourId, OmniLookAndFeel::getAccentCyan().withAlpha(0.85f));
 
     // Instance Name
     addAndMakeVisible(instanceNameLabel_);
@@ -409,7 +413,7 @@ void PluginBridgeAudioProcessorEditor::resized()
     header.removeFromLeft(34); // Space for logo icon
 
     titleLabel_.setBounds(header.removeFromLeft(115).removeFromTop(20));
-    subtitleLabel_.setBounds(12 + 34, 32, 130, 14);
+    subtitleLabel_.setBounds(12 + 34, 32, 185, 14);
 
     header.removeFromLeft(14);
 
