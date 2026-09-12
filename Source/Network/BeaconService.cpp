@@ -233,6 +233,7 @@ void BeaconService::broadcastLoop()
     bcastTarget.sin_addr.s_addr = inet_addr("255.255.255.255");
 
     auto startTime = getCurrentTimeMs();
+    uint64_t iterationCount = 0;
 
     while (running_)
     {
@@ -277,10 +278,36 @@ void BeaconService::broadcastLoop()
             sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
                    reinterpret_cast<sockaddr*>(&bcastTarget), sizeof(bcastTarget));
 
-            // 5. Send direct unicast beacons to explicitly configured peers
+            // 5. Send direct unicast beacons to explicitly configured peers AND all discovered peers
+            // This guarantees connectivity even when Wi-Fi routers block multicast/broadcast!
             {
-                std::lock_guard<std::mutex> lock(unicastMutex_);
-                for (const auto& target : unicastTargets_)
+                std::vector<UnicastTarget> allTargets;
+                {
+                    std::lock_guard<std::mutex> lock(unicastMutex_);
+                    allTargets = unicastTargets_;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(peerMutex_);
+                    for (const auto& peer : peers_)
+                    {
+                        if (!peer.ipAddress.empty())
+                        {
+                            bool alreadyIn = false;
+                            for (const auto& t : allTargets)
+                            {
+                                if (t.ip == peer.ipAddress && t.port == beaconPort_)
+                                {
+                                    alreadyIn = true;
+                                    break;
+                                }
+                            }
+                            if (!alreadyIn)
+                                allTargets.push_back({ peer.ipAddress, beaconPort_ });
+                        }
+                    }
+                }
+
+                for (const auto& target : allTargets)
                 {
                     sockaddr_in directTarget {};
                     directTarget.sin_family = AF_INET;
@@ -290,6 +317,19 @@ void BeaconService::broadcastLoop()
                            reinterpret_cast<sockaddr*>(&directTarget), sizeof(directTarget));
                 }
             }
+
+            // 6. Subnet sweep: sweep on startup, every 4s if no peers discovered, or every 30s as maintenance
+            bool hasPeers = false;
+            {
+                std::lock_guard<std::mutex> lock(peerMutex_);
+                hasPeers = !peers_.empty();
+            }
+
+            if (iterationCount == 0 || (!hasPeers && (iterationCount % 4 == 0)) || (hasPeers && (iterationCount % 30 == 0)))
+            {
+                scanSubnet();
+            }
+            iterationCount++;
         }
 
         pruneStalePeers();
@@ -338,16 +378,42 @@ void BeaconService::listenLoop()
                     continue;
             }
 
-            // Immediately send our beacon directly back to the sender so discovery is instant and two-way
-            if (sendSocket_ >= 0)
+            // Immediately send our beacon directly back to the sender so discovery is instant and two-way.
+            // Crucial: send to beaconPort_ (52800), NOT the sender's ephemeral port in senderAddr.sin_port!
+            // Do not reply if the packet itself is already a reply (BEACON_FLAG_REPLY), preventing feedback storms.
+            bool isReply = (packet.role & BEACON_FLAG_REPLY) != 0;
+            if (!isReply && sendSocket_ >= 0)
             {
-                BeaconPacket replyPacket;
+                uint64_t now = getCurrentTimeMs();
+                bool shouldReply = true;
                 {
-                    std::lock_guard<std::mutex> lock(beaconConfigMutex_);
-                    replyPacket = localBeacon_;
+                    std::lock_guard<std::mutex> lock(replyRateMutex_);
+                    auto it = lastReplyTimeByIp_.find(senderIp);
+                    if (it != lastReplyTimeByIp_.end() && (now - it->second) < 400)
+                    {
+                        shouldReply = false;
+                    }
+                    else
+                    {
+                        lastReplyTimeByIp_[senderIp] = now;
+                    }
                 }
-                sendto(sendSocket_, &replyPacket, sizeof(replyPacket), 0,
-                       reinterpret_cast<sockaddr*>(&senderAddr), sizeof(senderAddr));
+
+                if (shouldReply)
+                {
+                    BeaconPacket replyPacket;
+                    {
+                        std::lock_guard<std::mutex> lock(beaconConfigMutex_);
+                        replyPacket = localBeacon_;
+                    }
+                    replyPacket.role = (replyPacket.role & BEACON_ROLE_MASK) | BEACON_FLAG_REPLY;
+
+                    sockaddr_in replyAddr = senderAddr;
+                    replyAddr.sin_family = AF_INET;
+                    replyAddr.sin_port = htons(beaconPort_);
+                    sendto(sendSocket_, &replyPacket, sizeof(replyPacket), 0,
+                           reinterpret_cast<sockaddr*>(&replyAddr), sizeof(replyAddr));
+                }
             }
 
             bool updated = false;
@@ -544,6 +610,9 @@ void BeaconService::scanSubnet()
         for (uint32_t host = 1; host < 255; ++host)
         {
             uint32_t targetIp = netPrefix | host;
+            if (targetIp == ipHost)
+                continue;
+
             sockaddr_in directTarget {};
             directTarget.sin_family = AF_INET;
             directTarget.sin_port = htons(beaconPort_);

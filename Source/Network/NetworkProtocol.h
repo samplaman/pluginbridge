@@ -43,6 +43,7 @@ struct AudioPacketHeader
 constexpr uint8_t BEACON_ROLE_MASK   = 0x0F;
 constexpr uint8_t BEACON_FLAG_LINK   = 0x10;
 constexpr uint8_t BEACON_FLAG_UNLINK = 0x20;
+constexpr uint8_t BEACON_FLAG_REPLY  = 0x40;
 
 /** LAN discovery beacon packet broadcasted periodically */
 struct BeaconPacket

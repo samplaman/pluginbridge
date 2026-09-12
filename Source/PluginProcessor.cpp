@@ -76,6 +76,7 @@ PluginBridgeAudioProcessor::PluginBridgeAudioProcessor()
         else
         {
             disconnectPeer(peer);
+            beacon_.removeUnicastTarget(peer.ipAddress, DEFAULT_BEACON_PORT);
         }
     });
     beacon_.start();

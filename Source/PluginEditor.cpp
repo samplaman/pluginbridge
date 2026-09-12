@@ -25,7 +25,7 @@ PluginBridgeAudioProcessorEditor::PluginBridgeAudioProcessorEditor(PluginBridgeA
 #ifdef JucePlugin_VersionString
     subtitleLabel_.setText("OMNIBUS LAN AUDIO BUS • v" + juce::String(JucePlugin_VersionString), juce::dontSendNotification);
 #else
-    subtitleLabel_.setText("OMNIBUS LAN AUDIO BUS • v1.0.4", juce::dontSendNotification);
+    subtitleLabel_.setText("OMNIBUS LAN AUDIO BUS • v1.0.5", juce::dontSendNotification);
 #endif
     subtitleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(9.0f).withStyle("Bold")));
     subtitleLabel_.setColour(juce::Label::textColourId, OmniLookAndFeel::getAccentCyan().withAlpha(0.85f));
@@ -243,9 +243,15 @@ PluginBridgeAudioProcessorEditor::PluginBridgeAudioProcessorEditor(PluginBridgeA
     });
     peerList_.setOnConnectCallback([this](const DiscoveredPeer& peer, bool connect) {
         if (connect)
+        {
             processorRef_.connectToPeer(peer);
+            processorRef_.getBeaconService().addUnicastTarget(peer.ipAddress, DEFAULT_BEACON_PORT);
+        }
         else
+        {
             processorRef_.disconnectPeer(peer);
+            processorRef_.getBeaconService().removeUnicastTarget(peer.ipAddress, DEFAULT_BEACON_PORT);
+        }
         processorRef_.getBeaconService().sendLinkCommand(peer.ipAddress, DEFAULT_BEACON_PORT, connect);
     });
     peerList_.setOnPingCallback([this](const std::string& ip, uint16_t port) {

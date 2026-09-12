@@ -2,6 +2,7 @@
 
 #include "NetworkProtocol.h"
 #include <vector>
+#include <unordered_map>
 #include <mutex>
 #include <thread>
 #include <atomic>
@@ -71,6 +72,9 @@ private:
 
     mutable std::mutex unicastMutex_;
     std::vector<UnicastTarget> unicastTargets_;
+
+    mutable std::mutex replyRateMutex_;
+    std::unordered_map<std::string, uint64_t> lastReplyTimeByIp_;
 };
 
 } // namespace pluginbridge
