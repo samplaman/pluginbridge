@@ -394,6 +394,20 @@ void BeaconService::listenLoop()
                 auto currentPeers = getActivePeers();
                 onPeersUpdated_(currentPeers);
             }
+
+            uint8_t flag = packet.role & (BEACON_FLAG_LINK | BEACON_FLAG_UNLINK);
+            if (flag != 0 && onLinkCommand_)
+            {
+                DiscoveredPeer cmdPeer;
+                cmdPeer.uuid = peerUuid;
+                cmdPeer.instanceName = packet.instanceName;
+                cmdPeer.hostName = packet.hostName;
+                cmdPeer.ipAddress = senderIp;
+                cmdPeer.audioPort = packet.audioPort;
+                cmdPeer.numChannels = packet.numChannels;
+                cmdPeer.sampleRate = packet.sampleRate;
+                onLinkCommand_(cmdPeer, (flag & BEACON_FLAG_LINK) != 0);
+            }
         }
     }
 }
@@ -436,6 +450,31 @@ std::vector<DiscoveredPeer> BeaconService::getActivePeers() const
 void BeaconService::setOnPeersUpdated(PeerCallback callback)
 {
     onPeersUpdated_ = std::move(callback);
+}
+
+void BeaconService::setOnLinkCommand(LinkCommandCallback callback)
+{
+    onLinkCommand_ = std::move(callback);
+}
+
+void BeaconService::sendLinkCommand(const std::string& ipAddress, uint16_t beaconPort, bool connect)
+{
+    if (sendSocket_ < 0 || ipAddress.empty())
+        return;
+
+    BeaconPacket packetCopy;
+    {
+        std::lock_guard<std::mutex> lock(beaconConfigMutex_);
+        packetCopy = localBeacon_;
+    }
+    packetCopy.role = (packetCopy.role & BEACON_ROLE_MASK) | (connect ? BEACON_FLAG_LINK : BEACON_FLAG_UNLINK);
+
+    sockaddr_in directTarget {};
+    directTarget.sin_family = AF_INET;
+    directTarget.sin_port = htons(beaconPort);
+    directTarget.sin_addr.s_addr = inet_addr(ipAddress.c_str());
+    sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
+           reinterpret_cast<sockaddr*>(&directTarget), sizeof(directTarget));
 }
 
 void BeaconService::pingPeer(const std::string& ipAddress, uint16_t beaconPort)

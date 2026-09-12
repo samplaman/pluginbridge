@@ -67,7 +67,12 @@ public:
     uint16_t getAudioPort() const { return audioPort_; }
     void setAudioPort(uint16_t port);
 
+    void setTestToneEnabled(bool enabled) { testToneEnabled_.store(enabled); }
+    bool isTestToneEnabled() const { return testToneEnabled_.load(); }
+
 private:
+    std::atomic<bool> testToneEnabled_ { false };
+    float testTonePhase_ { 0.0f };
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     juce::AudioProcessorValueTreeState apvts_;

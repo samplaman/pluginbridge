@@ -40,6 +40,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> latencyAttachment_;
 
     juce::TextButton btnAudioDevice_;
+    juce::ToggleButton btnTestTone_;
 
     // Mode tabs
     juce::TextButton tabTxBtn_;

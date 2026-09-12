@@ -61,6 +61,8 @@ private:
 
     bool isInitialized_ { false };
     uint32_t nextExpectedSeq_ { 0 };
+    uint32_t currentBlockSeq_ { 0xFFFFFFFF };
+    int lastBlockFrames_ { 0 };
     uint16_t streamChannels_ { 2 };
 
     // Internal intermediate staging ring buffer

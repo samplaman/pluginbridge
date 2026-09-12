@@ -67,6 +67,17 @@ PluginBridgeAudioProcessor::PluginBridgeAudioProcessor()
 
     beacon_.setInstanceDetails(instanceUuid_, instanceName_, streamName_, audioPort_,
                               RoutingMatrix::MATRIX_SIZE, 48000, 0);
+    beacon_.setOnLinkCommand([this](const DiscoveredPeer& peer, bool connect) {
+        if (connect)
+        {
+            connectToPeer(peer);
+            beacon_.addUnicastTarget(peer.ipAddress, DEFAULT_BEACON_PORT);
+        }
+        else
+        {
+            disconnectPeer(peer);
+        }
+    });
     beacon_.start();
 
     startTimerHz(10);
@@ -190,6 +201,28 @@ void PluginBridgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, 
                     netRxPointers_.data(), RoutingMatrix::MATRIX_SIZE,
                     dawOutPointers_.data(), totalOutChannels,
                     numFrames);
+
+    // Test tone generator for instantaneous verification
+    if (testToneEnabled_.load(std::memory_order_relaxed))
+    {
+        double sr = getSampleRate();
+        if (sr <= 0.0) sr = 48000.0;
+        float phaseDelta = static_cast<float>(2.0 * 3.14159265358979323846 * 440.0 / sr);
+        for (int f = 0; f < numFrames; ++f)
+        {
+            float val = std::sin(testTonePhase_) * 0.15f; // -16.5 dBFS 440Hz test sine
+            testTonePhase_ += phaseDelta;
+            if (testTonePhase_ >= 6.2831853f)
+                testTonePhase_ -= 6.2831853f;
+
+            if (netTxPointers_[0] != nullptr) netTxPointers_[0][f] += val;
+            if (netTxPointers_[1] != nullptr) netTxPointers_[1][f] += val;
+            if (totalOutChannels > 0 && buffer.getWritePointer(0) != nullptr)
+                buffer.getWritePointer(0)[f] += val;
+            if (totalOutChannels > 1 && buffer.getWritePointer(1) != nullptr)
+                buffer.getWritePointer(1)[f] += val;
+        }
+    }
 
     // 3. Send Network TX audio if in Sender or Duplex role
     if (roleIdx != 2) // Not Receiver Only

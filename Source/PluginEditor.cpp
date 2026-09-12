@@ -242,6 +242,7 @@ PluginBridgeAudioProcessorEditor::PluginBridgeAudioProcessorEditor(PluginBridgeA
             processorRef_.connectToPeer(peer);
         else
             processorRef_.disconnectPeer(peer);
+        processorRef_.getBeaconService().sendLinkCommand(peer.ipAddress, DEFAULT_BEACON_PORT, connect);
     });
     peerList_.setOnPingCallback([this](const std::string& ip, uint16_t port) {
         processorRef_.getBeaconService().addUnicastTarget(ip, port);
@@ -250,6 +251,13 @@ PluginBridgeAudioProcessorEditor::PluginBridgeAudioProcessorEditor(PluginBridgeA
     peerList_.setOnScanCallback([this] {
         processorRef_.getBeaconService().scanSubnet();
     });
+
+    addAndMakeVisible(btnTestTone_);
+    btnTestTone_.setButtonText("440Hz TONE");
+    btnTestTone_.setColour(juce::ToggleButton::textColourId, OmniLookAndFeel::getTextSecondary());
+    btnTestTone_.onClick = [this] {
+        processorRef_.setTestToneEnabled(btnTestTone_.getToggleState());
+    };
 
     addAndMakeVisible(patchbay_);
 
@@ -441,6 +449,8 @@ void PluginBridgeAudioProcessorEditor::resized()
     masterMuteBtn_.setBounds(bottomBar.removeFromRight(62).reduced(2, 3));
     bottomBar.removeFromRight(8);
     masterGainSlider_.setBounds(bottomBar.removeFromRight(150));
+    bottomBar.removeFromRight(8);
+    btnTestTone_.setBounds(bottomBar.removeFromRight(100).reduced(2, 3));
 
     // Center Area: Peer List (left ~300px) and Patchbay (rest)
     int peerWidth = 300;

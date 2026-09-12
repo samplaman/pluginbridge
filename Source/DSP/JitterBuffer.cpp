@@ -25,6 +25,8 @@ void JitterBuffer::reset()
     packetQueue_.clear();
     isInitialized_ = false;
     nextExpectedSeq_ = 0;
+    currentBlockSeq_ = 0xFFFFFFFF;
+    lastBlockFrames_ = 0;
     readIndex_ = 0;
     writeIndex_ = 0;
     availableFrames_.store(0);
@@ -52,6 +54,8 @@ void JitterBuffer::pushPacket(const AudioPacketHeader& header, const float* audi
     {
         isInitialized_ = true;
         nextExpectedSeq_ = header.sequenceNumber;
+        currentBlockSeq_ = header.sequenceNumber;
+        lastBlockFrames_ = header.numFrames;
         streamChannels_ = std::min<uint16_t>(header.numChannels, static_cast<uint16_t>(maxChannels_));
     }
 
@@ -61,42 +65,54 @@ void JitterBuffer::pushPacket(const AudioPacketHeader& header, const float* audi
         return; // drop duplicate / ancient packet
     }
 
-    // Unpack interleaved audio payload directly into our ring buffer if in order
-    // or handle queueing
     int channelsToCopy = std::min<int>(header.numChannels, maxChannels_);
     int framesToCopy = header.numFrames;
 
-    // Check capacity
-    int currentAvail = availableFrames_.load(std::memory_order_relaxed);
-    if (currentAvail + framesToCopy > ringCapacity_)
+    // Check if new audio block (sequence number changed)
+    bool isNewBlock = (header.sequenceNumber != currentBlockSeq_);
+    if (isNewBlock)
     {
-        overruns_.fetch_add(1, std::memory_order_relaxed);
-        // Advance read pointer to discard old audio and avoid infinite lag
-        int discard = (currentAvail + framesToCopy) - ringCapacity_;
-        readIndex_ = (readIndex_ + discard) % ringCapacity_;
-        availableFrames_.fetch_sub(discard, std::memory_order_relaxed);
+        // Advance write pointer for previous block
+        if (lastBlockFrames_ > 0)
+        {
+            writeIndex_ = (writeIndex_ + lastBlockFrames_) % ringCapacity_;
+            availableFrames_.fetch_add(lastBlockFrames_, std::memory_order_release);
+        }
+
+        // Check capacity
+        int currentAvail = availableFrames_.load(std::memory_order_relaxed);
+        if (currentAvail + framesToCopy > ringCapacity_)
+        {
+            overruns_.fetch_add(1, std::memory_order_relaxed);
+            int discard = (currentAvail + framesToCopy) - ringCapacity_;
+            readIndex_ = (readIndex_ + discard) % ringCapacity_;
+            availableFrames_.fetch_sub(discard, std::memory_order_relaxed);
+        }
+
+        // Sequence jump / packet loss detection
+        if (seqGreaterThan(header.sequenceNumber, nextExpectedSeq_))
+        {
+            uint32_t lost = header.sequenceNumber - nextExpectedSeq_;
+            packetsLost_.fetch_add(lost, std::memory_order_relaxed);
+        }
+        nextExpectedSeq_ = header.sequenceNumber + 1;
+        currentBlockSeq_ = header.sequenceNumber;
+        lastBlockFrames_ = framesToCopy;
     }
 
-    // Sequence jump / packet loss detection
-    if (seqGreaterThan(header.sequenceNumber, nextExpectedSeq_))
-    {
-        uint32_t lost = header.sequenceNumber - nextExpectedSeq_;
-        packetsLost_.fetch_add(lost, std::memory_order_relaxed);
-    }
-    nextExpectedSeq_ = header.sequenceNumber + 1;
-
-    // Deinterleave and write to ring buffers
+    // Write samples to ring buffer starting at channelOffset
+    int baseCh = static_cast<int>(header.channelOffset);
     for (int f = 0; f < framesToCopy; ++f)
     {
         int writePos = (writeIndex_ + f) % ringCapacity_;
         for (int ch = 0; ch < channelsToCopy; ++ch)
         {
-            ringBuffers_[ch][writePos] = audioPayload[f * header.numChannels + ch];
+            if (baseCh + ch < maxChannels_)
+            {
+                ringBuffers_[baseCh + ch][writePos] = audioPayload[f * header.numChannels + ch];
+            }
         }
     }
-
-    writeIndex_ = (writeIndex_ + framesToCopy) % ringCapacity_;
-    availableFrames_.fetch_add(framesToCopy, std::memory_order_release);
 }
 
 void JitterBuffer::readFrames(float* const* outputChannels, int numChannels, int numFrames)

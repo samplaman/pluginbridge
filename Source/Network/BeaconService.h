@@ -14,6 +14,7 @@ class BeaconService
 {
 public:
     using PeerCallback = std::function<void(const std::vector<DiscoveredPeer>&)>;
+    using LinkCommandCallback = std::function<void(const DiscoveredPeer&, bool connect)>;
 
     BeaconService();
     ~BeaconService();
@@ -31,6 +32,7 @@ public:
 
     std::vector<DiscoveredPeer> getActivePeers() const;
     void setOnPeersUpdated(PeerCallback callback);
+    void setOnLinkCommand(LinkCommandCallback callback);
 
     std::string getLocalIp() const;
     static std::vector<std::string> getLocalIpList();
@@ -39,6 +41,7 @@ public:
     void addUnicastTarget(const std::string& ipAddress, uint16_t beaconPort = DEFAULT_BEACON_PORT);
     void removeUnicastTarget(const std::string& ipAddress, uint16_t beaconPort = DEFAULT_BEACON_PORT);
     void scanSubnet();
+    void sendLinkCommand(const std::string& ipAddress, uint16_t beaconPort, bool connect);
 
 private:
     struct UnicastTarget
@@ -57,6 +60,7 @@ private:
     mutable std::mutex peerMutex_;
     std::vector<DiscoveredPeer> peers_;
     PeerCallback onPeersUpdated_;
+    LinkCommandCallback onLinkCommand_;
 
     BeaconPacket localBeacon_ {};
     std::mutex beaconConfigMutex_;

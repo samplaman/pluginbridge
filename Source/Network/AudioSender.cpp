@@ -202,85 +202,137 @@ void AudioSender::sendWorkerLoop()
     auto* header = reinterpret_cast<AudioPacketHeader*>(packetBuffer.data());
     float* payload = reinterpret_cast<float*>(packetBuffer.data() + sizeof(AudioPacketHeader));
 
+    uint64_t lastHeartbeatMs = getCurrentTimeMs();
+
     while (running_)
     {
+        std::vector<SendTarget> currentTargets;
+        {
+            std::lock_guard<std::mutex> lock(targetsMutex_);
+            currentTargets = targets_;
+        }
+
         int targetChunk = packetFrames_.load(std::memory_order_relaxed);
         int available = fifoAvailable_.load(std::memory_order_acquire);
 
         if (available < targetChunk)
         {
+            uint64_t nowMs = getCurrentTimeMs();
+            // Send keepalive / heartbeat if linked to targets and idle for > 40ms
+            if (nowMs - lastHeartbeatMs >= 40 && !currentTargets.empty() && sendSocket_ >= 0)
+            {
+                lastHeartbeatMs = nowMs;
+                header->magic = AUDIO_MAGIC;
+                header->version = PROTOCOL_VER;
+                header->flags = 1; // Muted / Keepalive
+                header->numChannels = 2;
+                header->sampleRate = sampleRate_.load(std::memory_order_relaxed);
+                header->numFrames = static_cast<uint16_t>(targetChunk);
+                header->bitDepth = 32;
+                header->channelOffset = 0;
+                header->sequenceNumber = sequenceCounter_++;
+                header->timestampUs = getCurrentTimeUs();
+
+                {
+                    std::lock_guard<std::mutex> sLock(streamInfoMutex_);
+                    std::strncpy(header->streamId, streamId_.c_str(), sizeof(header->streamId) - 1);
+                    std::strncpy(header->streamName, streamName_.c_str(), sizeof(header->streamName) - 1);
+                    std::strncpy(header->senderHost, senderHost_.c_str(), sizeof(header->senderHost) - 1);
+                }
+
+                std::fill(payload, payload + (2 * targetChunk), 0.0f);
+                size_t hbSize = sizeof(AudioPacketHeader) + (2 * targetChunk * sizeof(float));
+
+                for (const auto& target : currentTargets)
+                {
+                    sockaddr_in destAddr {};
+                    destAddr.sin_family = AF_INET;
+                    destAddr.sin_port = htons(target.port);
+                    destAddr.sin_addr.s_addr = inet_addr(target.ipAddress.c_str());
+                    ssize_t sent = sendto(sendSocket_, packetBuffer.data(), hbSize, 0,
+                                          reinterpret_cast<sockaddr*>(&destAddr), sizeof(destAddr));
+                    if (sent > 0)
+                        bytesSent_.fetch_add(sent, std::memory_order_relaxed);
+                }
+                packetsSent_.fetch_add(1, std::memory_order_relaxed);
+            }
+
             // Spin-sleep for sub-millisecond precision
             std::this_thread::sleep_for(std::chrono::microseconds(200));
             continue;
         }
 
+        lastHeartbeatMs = getCurrentTimeMs();
         int chCount = numChannels_.load(std::memory_order_relaxed);
         int rIdx = fifoReadIdx_.load(std::memory_order_relaxed);
 
-        // Fill Header
-        header->magic = AUDIO_MAGIC;
-        header->version = PROTOCOL_VER;
-        header->flags = 0;
-        header->numChannels = static_cast<uint16_t>(chCount);
-        header->sampleRate = sampleRate_.load(std::memory_order_relaxed);
-        header->numFrames = static_cast<uint16_t>(targetChunk);
-        header->bitDepth = 32;
-        header->reserved = 0;
-        header->sequenceNumber = sequenceCounter_++;
-        header->timestampUs = getCurrentTimeUs();
+        uint32_t blockSeq = sequenceCounter_++;
+        uint64_t blockTs = getCurrentTimeUs();
 
+        // Max channels per packet to strictly keep packet size <= 1148 bytes (< 1500 MTU)
+        int maxChannelsPerPacket = std::max(1, 1024 / (targetChunk * static_cast<int>(sizeof(float))));
+
+        for (int chStart = 0; chStart < chCount; chStart += maxChannelsPerPacket)
         {
-            std::lock_guard<std::mutex> lock(streamInfoMutex_);
-            std::strncpy(header->streamId, streamId_.c_str(), sizeof(header->streamId) - 1);
-            std::strncpy(header->streamName, streamName_.c_str(), sizeof(header->streamName) - 1);
-            std::strncpy(header->senderHost, senderHost_.c_str(), sizeof(header->senderHost) - 1);
+            int chunkCh = std::min(maxChannelsPerPacket, chCount - chStart);
+
+            header->magic = AUDIO_MAGIC;
+            header->version = PROTOCOL_VER;
+            header->flags = 0;
+            header->numChannels = static_cast<uint16_t>(chunkCh);
+            header->sampleRate = sampleRate_.load(std::memory_order_relaxed);
+            header->numFrames = static_cast<uint16_t>(targetChunk);
+            header->bitDepth = 32;
+            header->channelOffset = static_cast<uint8_t>(chStart);
+            header->sequenceNumber = blockSeq;
+            header->timestampUs = blockTs;
+
+            {
+                std::lock_guard<std::mutex> sLock(streamInfoMutex_);
+                std::strncpy(header->streamId, streamId_.c_str(), sizeof(header->streamId) - 1);
+                std::strncpy(header->streamName, streamName_.c_str(), sizeof(header->streamName) - 1);
+                std::strncpy(header->senderHost, senderHost_.c_str(), sizeof(header->senderHost) - 1);
+            }
+
+            // Interleave audio samples for this channel bank
+            for (int f = 0; f < targetChunk; ++f)
+            {
+                int pos = (rIdx + f) % FIFO_CAPACITY;
+                for (int c = 0; c < chunkCh; ++c)
+                {
+                    payload[f * chunkCh + c] = fifoBuffers_[chStart + c][pos];
+                }
+            }
+
+            size_t packetSize = sizeof(AudioPacketHeader) + (chunkCh * targetChunk * sizeof(float));
+
+            if (sendSocket_ >= 0)
+            {
+                for (const auto& target : currentTargets)
+                {
+                    sockaddr_in destAddr {};
+                    destAddr.sin_family = AF_INET;
+                    destAddr.sin_port = htons(target.port);
+                    destAddr.sin_addr.s_addr = inet_addr(target.ipAddress.c_str());
+
+                    ssize_t sent = sendto(sendSocket_, packetBuffer.data(), packetSize, 0,
+                                          reinterpret_cast<sockaddr*>(&destAddr), sizeof(destAddr));
+                    if (sent > 0)
+                    {
+                        bytesSent_.fetch_add(sent, std::memory_order_relaxed);
+                    }
+                }
+            }
         }
 
-        // Interleave audio samples into payload
-        for (int f = 0; f < targetChunk; ++f)
+        if (!currentTargets.empty())
         {
-            int pos = (rIdx + f) % FIFO_CAPACITY;
-            for (int ch = 0; ch < chCount; ++ch)
-            {
-                payload[f * chCount + ch] = fifoBuffers_[ch][pos];
-            }
+            packetsSent_.fetch_add(1, std::memory_order_relaxed);
         }
 
         // Advance FIFO
         fifoReadIdx_.store((rIdx + targetChunk) % FIFO_CAPACITY, std::memory_order_release);
         fifoAvailable_.fetch_sub(targetChunk, std::memory_order_release);
-
-        size_t packetSize = sizeof(AudioPacketHeader) + (chCount * targetChunk * sizeof(float));
-
-        // Transmit to active targets
-        if (sendSocket_ >= 0)
-        {
-            std::vector<SendTarget> currentTargets;
-            {
-                std::lock_guard<std::mutex> lock(targetsMutex_);
-                currentTargets = targets_;
-            }
-
-            for (const auto& target : currentTargets)
-            {
-                sockaddr_in destAddr {};
-                destAddr.sin_family = AF_INET;
-                destAddr.sin_port = htons(target.port);
-                destAddr.sin_addr.s_addr = inet_addr(target.ipAddress.c_str());
-
-                ssize_t sent = sendto(sendSocket_, packetBuffer.data(), packetSize, 0,
-                                      reinterpret_cast<sockaddr*>(&destAddr), sizeof(destAddr));
-                if (sent > 0)
-                {
-                    bytesSent_.fetch_add(sent, std::memory_order_relaxed);
-                }
-            }
-
-            if (!currentTargets.empty())
-            {
-                packetsSent_.fetch_add(1, std::memory_order_relaxed);
-            }
-        }
 
         // Calculate bitrate every 500ms
         uint64_t now = getCurrentTimeMs();

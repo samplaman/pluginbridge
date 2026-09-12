@@ -32,7 +32,7 @@ struct AudioPacketHeader
     uint32_t sampleRate;       // 44100, 48000, 88200, 96000, 192000
     uint16_t numFrames;        // Frames per channel in this packet (e.g., 64, 128, 256)
     uint8_t  bitDepth;         // 32 (float), 24 (int24), 16 (int16)
-    uint8_t  reserved;         // 0
+    uint8_t  channelOffset;    // Starting channel offset (0 to 47)
     uint32_t sequenceNumber;   // Monotonically increasing packet sequence counter
     uint64_t timestampUs;      // Sender timestamp in microseconds
     char     streamId[32];     // Unique stream identifier
@@ -40,12 +40,16 @@ struct AudioPacketHeader
     char     senderHost[32];   // Sender computer name (e.g., "MacBook-Pro", "Studio-PC")
 };
 
+constexpr uint8_t BEACON_ROLE_MASK   = 0x0F;
+constexpr uint8_t BEACON_FLAG_LINK   = 0x10;
+constexpr uint8_t BEACON_FLAG_UNLINK = 0x20;
+
 /** LAN discovery beacon packet broadcasted periodically */
 struct BeaconPacket
 {
     uint32_t magic;            // BEACON_MAGIC ('PBDC')
     uint8_t  version;          // PROTOCOL_VER
-    uint8_t  role;             // 0: Matrix/Duplex, 1: Sender only, 2: Receiver only
+    uint8_t  role;             // 0: Matrix/Duplex, 1: Sender only, 2: Receiver only | flags
     uint16_t audioPort;        // UDP port receiver is listening on
     uint16_t numChannels;      // Number of audio channels supported
     uint32_t sampleRate;       // Current DAW sample rate
