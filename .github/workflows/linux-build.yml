@@ -10,7 +10,7 @@ on:
 jobs:
   build-linux:
     name: Linux x86_64 (Ubuntu)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -82,3 +82,4 @@ jobs:
           path: staging/
           retention-days: 14
           if-no-files-found: warn
+
