@@ -1,0 +1,84 @@
+name: Linux Build & Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Linux x86_64 (Ubuntu)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            libasound2-dev \
+            libjack-jackd2-dev \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libx11-dev \
+            libxcomposite-dev \
+            libxcursor-dev \
+            libxext-dev \
+            libxinerama-dev \
+            libxrandr-dev \
+            libxrender-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            ladspa-sdk
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=20
+
+      - name: Build Standalone, VST3 & Test Harness
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Run Engine Test Suite
+        run: |
+          ./build/test_harness
+
+      - name: Stage Artifacts
+        run: |
+          mkdir -p staging
+          # Copy VST3 bundle if generated
+          if [ -d "build/PluginBridge_artefacts/Release/VST3" ]; then
+            cp -r build/PluginBridge_artefacts/Release/VST3 staging/
+          elif [ -d "build/PluginBridge_artefacts/VST3" ]; then
+            cp -r build/PluginBridge_artefacts/VST3 staging/
+          fi
+          # Copy Standalone executable if generated
+          if [ -d "build/PluginBridge_artefacts/Release/Standalone" ]; then
+            cp -r build/PluginBridge_artefacts/Release/Standalone staging/
+          elif [ -d "build/PluginBridge_artefacts/Standalone" ]; then
+            cp -r build/PluginBridge_artefacts/Standalone staging/
+          fi
+          # Copy test harness binary
+          if [ -f "build/test_harness" ]; then
+            cp build/test_harness staging/
+          fi
+          ls -la staging/
+
+      - name: Upload Linux Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PluginBridge-Linux-x86_64
+          path: staging/
+          retention-days: 14
+          if-no-files-found: warn

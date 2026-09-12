@@ -54,10 +54,10 @@ ChannelMappingComponent::ChannelMappingComponent(RoutingMatrix& matrix, MapDirec
 
     juce::String prefix = (direction_ == MapDirection::Inputs) ? "IN " : "OUT ";
 
-    for (int i = 0; i < RoutingMatrix::MATRIX_SIZE; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(RoutingMatrix::MATRIX_SIZE); ++i)
     {
         rows_[i].label = std::make_unique<juce::Label>();
-        rows_[i].label->setText(prefix + juce::String::formatted("%02d", i + 1) + ":", juce::dontSendNotification);
+        rows_[i].label->setText(prefix + juce::String::formatted("%02d", static_cast<int>(i + 1)) + ":", juce::dontSendNotification);
         rows_[i].label->setFont(juce::Font(juce::FontOptions().withHeight(11.0f).withStyle("Bold")));
         rows_[i].label->setColour(juce::Label::textColourId, OmniLookAndFeel::getTextSecondary());
         contentContainer_->addAndMakeVisible(*rows_[i].label);
@@ -68,15 +68,15 @@ ChannelMappingComponent::ChannelMappingComponent(RoutingMatrix& matrix, MapDirec
             rows_[i].combo->addItem("Interface Ch " + juce::String(h + 1), h + 1);
         }
 
-        int chIndex = i;
+        size_t chIndex = i;
         rows_[i].combo->onChange = [this, chIndex] {
             int selectedHw = rows_[chIndex].combo->getSelectedId() - 1;
             if (selectedHw >= 0 && selectedHw < RoutingMatrix::MATRIX_SIZE)
             {
                 if (direction_ == MapDirection::Inputs)
-                    matrix_.setInputChannelMap(chIndex, selectedHw);
+                    matrix_.setInputChannelMap(static_cast<int>(chIndex), selectedHw);
                 else
-                    matrix_.setOutputChannelMap(chIndex, selectedHw);
+                    matrix_.setOutputChannelMap(static_cast<int>(chIndex), selectedHw);
             }
         };
         contentContainer_->addAndMakeVisible(*rows_[i].combo);
@@ -91,11 +91,11 @@ ChannelMappingComponent::ChannelMappingComponent(RoutingMatrix& matrix, MapDirec
 
 void ChannelMappingComponent::refreshCombos()
 {
-    for (int i = 0; i < RoutingMatrix::MATRIX_SIZE; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(RoutingMatrix::MATRIX_SIZE); ++i)
     {
         int hw = (direction_ == MapDirection::Inputs)
-            ? matrix_.getInputChannelMap(i)
-            : matrix_.getOutputChannelMap(i);
+            ? matrix_.getInputChannelMap(static_cast<int>(i))
+            : matrix_.getOutputChannelMap(static_cast<int>(i));
         rows_[i].combo->setSelectedId(hw + 1, juce::dontSendNotification);
     }
 }
@@ -131,10 +131,10 @@ void ChannelMappingComponent::resized()
     int totalH = 16 * rowHeight + 10;
     contentContainer_->setBounds(0, 0, vpBounds.getWidth() - 16, totalH);
 
-    for (int i = 0; i < RoutingMatrix::MATRIX_SIZE; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(RoutingMatrix::MATRIX_SIZE); ++i)
     {
-        int col = i / 16;
-        int row = i % 16;
+        int col = static_cast<int>(i / 16);
+        int row = static_cast<int>(i % 16);
 
         int x = col * colWidth + 6;
         int y = row * rowHeight + 4;

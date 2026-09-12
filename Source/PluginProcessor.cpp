@@ -52,7 +52,7 @@ PluginBridgeAudioProcessor::PluginBridgeAudioProcessor()
     dawInPointers_.resize(RoutingMatrix::MATRIX_SIZE);
     dawOutPointers_.resize(RoutingMatrix::MATRIX_SIZE);
 
-    for (int i = 0; i < RoutingMatrix::MATRIX_SIZE; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(RoutingMatrix::MATRIX_SIZE); ++i)
     {
         netTxBuffers_[i].resize(2048, 0.0f);
         netTxPointers_[i] = netTxBuffers_[i].data();
@@ -79,8 +79,8 @@ PluginBridgeAudioProcessor::~PluginBridgeAudioProcessor()
 
 void PluginBridgeAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    int maxBlock = std::max(samplesPerBlock * 2, 2048);
-    for (int i = 0; i < RoutingMatrix::MATRIX_SIZE; ++i)
+    size_t maxBlock = static_cast<size_t>(std::max(samplesPerBlock * 2, 2048));
+    for (size_t i = 0; i < static_cast<size_t>(RoutingMatrix::MATRIX_SIZE); ++i)
     {
         netTxBuffers_[i].resize(maxBlock, 0.0f);
         netTxPointers_[i] = netTxBuffers_[i].data();
@@ -134,10 +134,10 @@ void PluginBridgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, 
     float masterGain = juce::Decibels::decibelsToGain(masterGainDb);
 
     // Setup input pointers
-    for (int i = 0; i < RoutingMatrix::MATRIX_SIZE; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(RoutingMatrix::MATRIX_SIZE); ++i)
     {
-        dawInPointers_[i] = (i < totalInChannels) ? buffer.getReadPointer(i) : nullptr;
-        dawOutPointers_[i] = (i < totalOutChannels) ? buffer.getWritePointer(i) : nullptr;
+        dawInPointers_[i] = (static_cast<int>(i) < totalInChannels) ? buffer.getReadPointer(static_cast<int>(i)) : nullptr;
+        dawOutPointers_[i] = (static_cast<int>(i) < totalOutChannels) ? buffer.getWritePointer(static_cast<int>(i)) : nullptr;
     }
 
     // 1. Fetch Network RX audio if in Receiver or Duplex role
@@ -147,7 +147,7 @@ void PluginBridgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, 
     }
     else
     {
-        for (int i = 0; i < RoutingMatrix::MATRIX_SIZE; ++i)
+        for (size_t i = 0; i < static_cast<size_t>(RoutingMatrix::MATRIX_SIZE); ++i)
             std::fill(netRxBuffers_[i].begin(), netRxBuffers_[i].begin() + numFrames, 0.0f);
     }
 

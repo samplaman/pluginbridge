@@ -81,6 +81,8 @@ target_link_libraries(PluginBridge PRIVATE
 )
 
 # Test harness target
+find_package(Threads REQUIRED)
+
 add_executable(test_harness
     Tests/TestHarness.cpp
     Source/Network/BeaconService.cpp
@@ -93,5 +95,9 @@ add_executable(test_harness
 
 target_include_directories(test_harness PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
+)
+
+target_link_libraries(test_harness PRIVATE
+    Threads::Threads
 )
 
