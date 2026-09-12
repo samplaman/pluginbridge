@@ -16,6 +16,7 @@ public:
             if (callback_)
             {
                 isCurrentlyConnected_ = !isCurrentlyConnected_;
+                peer_.isConnected = isCurrentlyConnected_;
                 updateButtonState();
                 callback_(peer_, isCurrentlyConnected_);
             }
@@ -26,6 +27,7 @@ public:
     {
         peer_ = peer;
         isCurrentlyConnected_ = isConnected;
+        peer_.isConnected = isConnected;
         updateButtonState();
         repaint();
     }
@@ -102,13 +104,20 @@ private:
 
 PeerListComponent::PeerListComponent()
 {
+    addAndMakeVisible(localIpBannerLabel_);
+    localIpBannerLabel_.setText("THIS DEVICE: 127.0.0.1 : 52801", juce::dontSendNotification);
+    localIpBannerLabel_.setFont(juce::Font(juce::FontOptions().withHeight(10.0f).withStyle("Bold")));
+    localIpBannerLabel_.setColour(juce::Label::textColourId, OmniLookAndFeel::getAccentCyan());
+    localIpBannerLabel_.setColour(juce::Label::backgroundColourId, OmniLookAndFeel::getSurfaceAlt().withAlpha(0.6f));
+    localIpBannerLabel_.setJustificationType(juce::Justification::centred);
+
     addAndMakeVisible(listBox_);
     listBox_.setModel(this);
     listBox_.setRowHeight(64);
     listBox_.setColour(juce::ListBox::backgroundColourId, OmniLookAndFeel::getBgDark());
 
     addAndMakeVisible(manualLabel_);
-    manualLabel_.setText("MANUAL PEER IP", juce::dontSendNotification);
+    manualLabel_.setText("MANUAL PEER IP (DIRECT UNICAST)", juce::dontSendNotification);
     manualLabel_.setFont(juce::Font(juce::FontOptions().withHeight(10.0f).withStyle("Bold")));
     manualLabel_.setColour(juce::Label::textColourId, OmniLookAndFeel::getTextSecondary());
 
@@ -125,17 +134,29 @@ PeerListComponent::PeerListComponent()
     connectManualBtn_.setColour(juce::TextButton::buttonColourId, OmniLookAndFeel::getAccentCyan().withAlpha(0.2f));
     connectManualBtn_.setColour(juce::TextButton::textColourOffId, OmniLookAndFeel::getAccentCyan());
     connectManualBtn_.onClick = [this] {
+        juce::String ipText = ipEditor_.getText().trim();
+        if (ipText.isEmpty())
+            return;
+
         DiscoveredPeer manualPeer;
-        manualPeer.instanceName = "Manual Peer";
-        manualPeer.hostName = ipEditor_.getText().toStdString();
-        manualPeer.ipAddress = ipEditor_.getText().toStdString();
+        manualPeer.instanceName = "Direct Peer";
+        manualPeer.hostName = ipText.toStdString();
+        manualPeer.ipAddress = ipText.toStdString();
         manualPeer.audioPort = static_cast<uint16_t>(portEditor_.getText().getIntValue());
-        manualPeer.numChannels = 16;
+        manualPeer.numChannels = 48;
         manualPeer.sampleRate = 48000;
         manualPeer.streamName = "Direct";
+        manualPeer.isConnected = true;
 
-        peers_.push_back(manualPeer);
-        listBox_.updateContent();
+        auto it = std::find_if(manualPeers_.begin(), manualPeers_.end(), [&](const DiscoveredPeer& p) {
+            return p.ipAddress == manualPeer.ipAddress && p.audioPort == manualPeer.audioPort;
+        });
+        if (it == manualPeers_.end())
+            manualPeers_.push_back(manualPeer);
+        else
+            it->isConnected = true;
+
+        updatePeers(peers_);
 
         if (onConnectCallback_)
             onConnectCallback_(manualPeer, true);
@@ -159,9 +180,41 @@ void PeerListComponent::timerCallback()
         repaint();
 }
 
-void PeerListComponent::updatePeers(const std::vector<DiscoveredPeer>& peers)
+void PeerListComponent::setLocalDeviceIp(const juce::String& ip, uint16_t port)
 {
-    peers_ = peers;
+    localIpString_ = ip;
+    localPort_ = port;
+    localIpBannerLabel_.setText("THIS DEVICE: " + ip + " : " + juce::String(port), juce::dontSendNotification);
+    repaint();
+}
+
+void PeerListComponent::setIsConnectedCallback(IsConnectedCallback callback)
+{
+    isConnectedCallback_ = std::move(callback);
+}
+
+void PeerListComponent::updatePeers(const std::vector<DiscoveredPeer>& discovered)
+{
+    std::vector<DiscoveredPeer> merged = discovered;
+
+    // Retain manual peers
+    for (const auto& mp : manualPeers_)
+    {
+        auto it = std::find_if(merged.begin(), merged.end(), [&](const DiscoveredPeer& p) {
+            return p.ipAddress == mp.ipAddress && p.audioPort == mp.audioPort;
+        });
+        if (it == merged.end())
+            merged.push_back(mp);
+    }
+
+    // Determine connected status from engine
+    for (auto& p : merged)
+    {
+        if (isConnectedCallback_)
+            p.isConnected = isConnectedCallback_(p);
+    }
+
+    peers_ = std::move(merged);
     listBox_.updateContent();
     repaint();
 }
@@ -254,6 +307,9 @@ void PeerListComponent::resized()
 {
     auto bounds = getLocalBounds();
     bounds.removeFromTop(32); // Header banner
+
+    // Local device info banner
+    localIpBannerLabel_.setBounds(bounds.removeFromTop(20).reduced(6, 1));
 
     // Manual connect bar at bottom
     auto bottomSection = bounds.removeFromBottom(60);

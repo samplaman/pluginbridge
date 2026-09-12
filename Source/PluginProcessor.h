@@ -56,6 +56,7 @@ public:
     // Connection helpers
     void connectToPeer(const DiscoveredPeer& peer);
     void disconnectPeer(const DiscoveredPeer& peer);
+    bool isPeerConnected(const DiscoveredPeer& peer) const;
 
     std::string getInstanceName() const { return instanceName_; }
     void setInstanceName(const std::string& name);

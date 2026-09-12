@@ -35,6 +35,8 @@ public:
     void addTarget(const std::string& ipAddress, uint16_t port);
     void removeTarget(const std::string& ipAddress, uint16_t port);
     void clearTargets();
+    bool hasTarget(const std::string& ipAddress, uint16_t port) const;
+    std::vector<SendTarget> getTargets() const;
 
     void setPacketFrames(int frames); // e.g., 64, 128, 256
     int getPacketFrames() const { return packetFrames_.load(); }

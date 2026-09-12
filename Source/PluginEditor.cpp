@@ -233,6 +233,10 @@ PluginBridgeAudioProcessorEditor::PluginBridgeAudioProcessorEditor(PluginBridgeA
 
     // Central components
     addAndMakeVisible(peerList_);
+    peerList_.setLocalDeviceIp(processorRef_.getBeaconService().getLocalIp(), processorRef_.getAudioPort());
+    peerList_.setIsConnectedCallback([this](const DiscoveredPeer& peer) {
+        return processorRef_.isPeerConnected(peer);
+    });
     peerList_.setOnConnectCallback([this](const DiscoveredPeer& peer, bool connect) {
         if (connect)
             processorRef_.connectToPeer(peer);

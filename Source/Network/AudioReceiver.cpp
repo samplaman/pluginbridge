@@ -193,6 +193,17 @@ void AudioReceiver::receiveWorkerLoop()
 
             if (header->magic == AUDIO_MAGIC && header->version == PROTOCOL_VER)
             {
+                char ipBuf[INET_ADDRSTRLEN] = {0};
+                inet_ntop(AF_INET, &senderAddr.sin_addr, ipBuf, sizeof(ipBuf));
+                uint16_t senderPort = ntohs(senderAddr.sin_port);
+
+                {
+                    std::lock_guard<std::mutex> lock(lastSenderMutex_);
+                    lastSenderIp_ = ipBuf;
+                    lastSenderPort_ = senderPort;
+                }
+                lastPacketTimeMs_.store(getCurrentTimeMs(), std::memory_order_relaxed);
+
                 // Check filter if set
                 std::string filter;
                 {
@@ -256,6 +267,23 @@ float AudioReceiver::getCurrentSpeedRatio() const
 float AudioReceiver::getBitrateKbps() const
 {
     return bitrateKbps_.load(std::memory_order_relaxed);
+}
+
+std::string AudioReceiver::getLastSenderIp() const
+{
+    std::lock_guard<std::mutex> lock(lastSenderMutex_);
+    return lastSenderIp_;
+}
+
+uint16_t AudioReceiver::getLastSenderPort() const
+{
+    std::lock_guard<std::mutex> lock(lastSenderMutex_);
+    return lastSenderPort_;
+}
+
+uint64_t AudioReceiver::getLastPacketTimeMs() const
+{
+    return lastPacketTimeMs_.load(std::memory_order_relaxed);
 }
 
 } // namespace pluginbridge

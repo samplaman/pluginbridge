@@ -14,12 +14,15 @@ class PeerListComponent : public juce::Component,
 {
 public:
     using ConnectCallback = std::function<void(const DiscoveredPeer&, bool connect)>;
+    using IsConnectedCallback = std::function<bool(const DiscoveredPeer&)>;
 
     PeerListComponent();
     ~PeerListComponent() override;
 
     void updatePeers(const std::vector<DiscoveredPeer>& peers);
     void setOnConnectCallback(ConnectCallback callback);
+    void setIsConnectedCallback(IsConnectedCallback callback);
+    void setLocalDeviceIp(const juce::String& ip, uint16_t port);
 
     // ListBoxModel methods
     int getNumRows() override;
@@ -32,7 +35,11 @@ public:
 
 private:
     std::vector<DiscoveredPeer> peers_;
+    std::vector<DiscoveredPeer> manualPeers_;
     juce::ListBox listBox_;
+
+    // Local device info banner
+    juce::Label localIpBannerLabel_;
 
     // Manual connect UI
     juce::Label manualLabel_;
@@ -41,7 +48,10 @@ private:
     juce::TextButton connectManualBtn_;
 
     ConnectCallback onConnectCallback_;
+    IsConnectedCallback isConnectedCallback_;
     float pulsePhase_ { 0.0f };
+    juce::String localIpString_ { "127.0.0.1" };
+    uint16_t localPort_ { DEFAULT_AUDIO_PORT };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PeerListComponent)
 };

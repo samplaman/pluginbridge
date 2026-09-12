@@ -9,14 +9,76 @@
 #include <sys/types.h>
 #include <poll.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 
 namespace pluginbridge
 {
+
+struct InterfaceInfo
+{
+    std::string name;
+    in_addr ip;
+    in_addr broadcast;
+    bool hasBroadcast { false };
+};
+
+static std::vector<InterfaceInfo> getLocalInterfaces()
+{
+    std::vector<InterfaceInfo> list;
+    ifaddrs* ifap = nullptr;
+    if (getifaddrs(&ifap) == 0 && ifap != nullptr)
+    {
+        for (ifaddrs* ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next)
+        {
+            if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET)
+                continue;
+
+            // Skip loopback or down interfaces
+            if ((ifa->ifa_flags & IFF_LOOPBACK) || !(ifa->ifa_flags & IFF_UP))
+                continue;
+
+            InterfaceInfo info;
+            info.name = ifa->ifa_name ? ifa->ifa_name : "";
+            info.ip = reinterpret_cast<sockaddr_in*>(ifa->ifa_addr)->sin_addr;
+
+            if ((ifa->ifa_flags & IFF_BROADCAST) && ifa->ifa_broadaddr != nullptr)
+            {
+                info.broadcast = reinterpret_cast<sockaddr_in*>(ifa->ifa_broadaddr)->sin_addr;
+                info.hasBroadcast = true;
+            }
+            list.push_back(info);
+        }
+        freeifaddrs(ifap);
+    }
+    return list;
+}
 
 static uint64_t getCurrentTimeMs()
 {
     using namespace std::chrono;
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+std::vector<std::string> BeaconService::getLocalIpList()
+{
+    std::vector<std::string> ips;
+    auto ifaces = getLocalInterfaces();
+    for (const auto& iface : ifaces)
+    {
+        char buf[INET_ADDRSTRLEN] = {0};
+        inet_ntop(AF_INET, &iface.ip, buf, sizeof(buf));
+        ips.push_back(buf);
+    }
+    return ips;
+}
+
+std::string BeaconService::getLocalIp() const
+{
+    auto list = getLocalIpList();
+    if (!list.empty())
+        return list[0];
+    return "127.0.0.1";
 }
 
 BeaconService::BeaconService()
@@ -106,11 +168,21 @@ void BeaconService::start(uint16_t beaconPort)
 
         if (bind(listenSocket_, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr)) == 0)
         {
-            // Join multicast group
+            // Join multicast group on default interface
             ip_mreq mreq {};
             mreq.imr_multiaddr.s_addr = inet_addr(DEFAULT_MULTICAST_GROUP);
             mreq.imr_interface.s_addr = htonl(INADDR_ANY);
             setsockopt(listenSocket_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq));
+
+            // Also join explicitly on each physical interface (vital for Linux multi-interface / wifi)
+            auto ifaces = getLocalInterfaces();
+            for (const auto& iface : ifaces)
+            {
+                ip_mreq ifMreq {};
+                ifMreq.imr_multiaddr.s_addr = inet_addr(DEFAULT_MULTICAST_GROUP);
+                ifMreq.imr_interface = iface.ip;
+                setsockopt(listenSocket_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &ifMreq, sizeof(ifMreq));
+            }
         }
         else
         {
@@ -173,11 +245,35 @@ void BeaconService::broadcastLoop()
 
         if (sendSocket_ >= 0)
         {
-            // Send multicast beacon
+            auto ifaces = getLocalInterfaces();
+
+            // 1. Send standard multicast beacon
             sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
                    reinterpret_cast<sockaddr*>(&mcastTarget), sizeof(mcastTarget));
 
-            // Also send broadcast beacon as fallback for strict Wi-Fi routers
+            // 2. Transmit multicast pinned to each active network interface
+            for (const auto& iface : ifaces)
+            {
+                setsockopt(sendSocket_, IPPROTO_IP, IP_MULTICAST_IF, &iface.ip, sizeof(iface.ip));
+                sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
+                       reinterpret_cast<sockaddr*>(&mcastTarget), sizeof(mcastTarget));
+            }
+
+            // 3. Send directed broadcast to each local subnet (e.g. 192.168.1.255)
+            for (const auto& iface : ifaces)
+            {
+                if (iface.hasBroadcast)
+                {
+                    sockaddr_in subBcast {};
+                    subBcast.sin_family = AF_INET;
+                    subBcast.sin_port = htons(beaconPort_);
+                    subBcast.sin_addr = iface.broadcast;
+                    sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
+                           reinterpret_cast<sockaddr*>(&subBcast), sizeof(subBcast));
+                }
+            }
+
+            // 4. Send fallback 255.255.255.255
             sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
                    reinterpret_cast<sockaddr*>(&bcastTarget), sizeof(bcastTarget));
         }

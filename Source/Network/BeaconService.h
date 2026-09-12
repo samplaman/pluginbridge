@@ -32,6 +32,9 @@ public:
     std::vector<DiscoveredPeer> getActivePeers() const;
     void setOnPeersUpdated(PeerCallback callback);
 
+    std::string getLocalIp() const;
+    static std::vector<std::string> getLocalIpList();
+
 private:
     void broadcastLoop();
     void listenLoop();

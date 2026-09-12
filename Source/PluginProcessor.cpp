@@ -144,6 +144,21 @@ void PluginBridgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, 
     if (roleIdx != 1) // Not Sender Only
     {
         receiver_.readAudio(netRxPointers_.data(), RoutingMatrix::MATRIX_SIZE, numFrames);
+
+        // Auto-link return streaming for full duplex communication
+        if (roleIdx == 0) // Duplex mode
+        {
+            uint64_t lastPkt = receiver_.getLastPacketTimeMs();
+            if (lastPkt > 0)
+            {
+                std::string inIp = receiver_.getLastSenderIp();
+                uint16_t inPort = receiver_.getLastSenderPort();
+                if (!inIp.empty() && inPort != 0 && !sender_.hasTarget(inIp, inPort))
+                {
+                    sender_.addTarget(inIp, inPort);
+                }
+            }
+        }
     }
     else
     {
@@ -187,6 +202,11 @@ void PluginBridgeAudioProcessor::connectToPeer(const DiscoveredPeer& peer)
 void PluginBridgeAudioProcessor::disconnectPeer(const DiscoveredPeer& peer)
 {
     sender_.removeTarget(peer.ipAddress, peer.audioPort);
+}
+
+bool PluginBridgeAudioProcessor::isPeerConnected(const DiscoveredPeer& peer) const
+{
+    return sender_.hasTarget(peer.ipAddress, peer.audioPort);
 }
 
 void PluginBridgeAudioProcessor::setInstanceName(const std::string& name)

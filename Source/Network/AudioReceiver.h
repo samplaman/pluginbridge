@@ -42,6 +42,10 @@ public:
     float getCurrentSpeedRatio() const;
     float getBitrateKbps() const;
 
+    std::string getLastSenderIp() const;
+    uint16_t getLastSenderPort() const;
+    uint64_t getLastPacketTimeMs() const;
+
 private:
     void receiveWorkerLoop();
 
@@ -66,6 +70,11 @@ private:
     std::atomic<uint64_t> lastBytesReceived_ { 0 };
     std::atomic<float> bitrateKbps_ { 0.0f };
     uint64_t lastBitrateTimeMs_ { 0 };
+
+    mutable std::mutex lastSenderMutex_;
+    std::string lastSenderIp_;
+    uint16_t lastSenderPort_ { 0 };
+    std::atomic<uint64_t> lastPacketTimeMs_ { 0 };
 };
 
 } // namespace pluginbridge

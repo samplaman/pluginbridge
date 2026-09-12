@@ -124,6 +124,23 @@ void AudioSender::clearTargets()
     targets_.clear();
 }
 
+bool AudioSender::hasTarget(const std::string& ipAddress, uint16_t port) const
+{
+    std::lock_guard<std::mutex> lock(targetsMutex_);
+    for (const auto& t : targets_)
+    {
+        if (t.ipAddress == ipAddress && t.port == port)
+            return true;
+    }
+    return false;
+}
+
+std::vector<SendTarget> AudioSender::getTargets() const
+{
+    std::lock_guard<std::mutex> lock(targetsMutex_);
+    return targets_;
+}
+
 void AudioSender::setPacketFrames(int frames)
 {
     packetFrames_.store(std::clamp(frames, 32, MAX_FRAMES_PER_PACKET));
