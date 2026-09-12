@@ -15,6 +15,8 @@ class PeerListComponent : public juce::Component,
 public:
     using ConnectCallback = std::function<void(const DiscoveredPeer&, bool connect)>;
     using IsConnectedCallback = std::function<bool(const DiscoveredPeer&)>;
+    using PingCallback = std::function<void(const std::string& ip, uint16_t port)>;
+    using ScanCallback = std::function<void()>;
 
     PeerListComponent();
     ~PeerListComponent() override;
@@ -22,6 +24,8 @@ public:
     void updatePeers(const std::vector<DiscoveredPeer>& peers);
     void setOnConnectCallback(ConnectCallback callback);
     void setIsConnectedCallback(IsConnectedCallback callback);
+    void setOnPingCallback(PingCallback callback);
+    void setOnScanCallback(ScanCallback callback);
     void setLocalDeviceIp(const juce::String& ip, uint16_t port);
 
     // ListBoxModel methods
@@ -47,8 +51,12 @@ private:
     juce::TextEditor portEditor_;
     juce::TextButton connectManualBtn_;
 
+    juce::TextButton scanSubnetBtn_;
+
     ConnectCallback onConnectCallback_;
     IsConnectedCallback isConnectedCallback_;
+    PingCallback onPingCallback_;
+    ScanCallback onScanCallback_;
     float pulsePhase_ { 0.0f };
     juce::String localIpString_ { "127.0.0.1" };
     uint16_t localPort_ { DEFAULT_AUDIO_PORT };

@@ -129,6 +129,19 @@ PeerListComponent::PeerListComponent()
     portEditor_.setText("52801");
     portEditor_.setFont(juce::Font(juce::FontOptions().withHeight(11.0f)));
 
+    addAndMakeVisible(scanSubnetBtn_);
+    scanSubnetBtn_.setButtonText("SCAN LAN");
+    scanSubnetBtn_.setColour(juce::TextButton::buttonColourId, OmniLookAndFeel::getSurfaceAlt());
+    scanSubnetBtn_.setColour(juce::TextButton::textColourOffId, OmniLookAndFeel::getAccentCyan());
+    scanSubnetBtn_.onClick = [this] {
+        scanSubnetBtn_.setButtonText("SWEEPING");
+        if (onScanCallback_)
+            onScanCallback_();
+        juce::Timer::callAfterDelay(1500, [this] {
+            scanSubnetBtn_.setButtonText("SCAN LAN");
+        });
+    };
+
     addAndMakeVisible(connectManualBtn_);
     connectManualBtn_.setButtonText("+ ADD");
     connectManualBtn_.setColour(juce::TextButton::buttonColourId, OmniLookAndFeel::getAccentCyan().withAlpha(0.2f));
@@ -155,6 +168,9 @@ PeerListComponent::PeerListComponent()
             manualPeers_.push_back(manualPeer);
         else
             it->isConnected = true;
+
+        if (onPingCallback_)
+            onPingCallback_(manualPeer.ipAddress, DEFAULT_BEACON_PORT);
 
         updatePeers(peers_);
 
@@ -224,6 +240,16 @@ void PeerListComponent::setOnConnectCallback(ConnectCallback callback)
     onConnectCallback_ = std::move(callback);
 }
 
+void PeerListComponent::setOnPingCallback(PingCallback callback)
+{
+    onPingCallback_ = std::move(callback);
+}
+
+void PeerListComponent::setOnScanCallback(ScanCallback callback)
+{
+    onScanCallback_ = std::move(callback);
+}
+
 int PeerListComponent::getNumRows()
 {
     return static_cast<int>(peers_.size());
@@ -263,10 +289,10 @@ void PeerListComponent::paint(juce::Graphics& g)
     // Title text
     g.setFont(juce::Font(juce::FontOptions().withHeight(11.0f).withStyle("Bold")));
     g.setColour(OmniLookAndFeel::getTextPrimary());
-    g.drawText("LAN PEER DISCOVERY", 12, 0, getWidth() - 70, 32, juce::Justification::centredLeft);
+    g.drawText("LAN PEERS", 12, 0, 75, 32, juce::Justification::centredLeft);
 
     // Count badge
-    auto badgeRect = juce::Rectangle<float>(static_cast<float>(getWidth() - 36), 7.0f, 24.0f, 18.0f);
+    auto badgeRect = juce::Rectangle<float>(90.0f, 7.0f, 22.0f, 18.0f);
     g.setColour(OmniLookAndFeel::getSurfaceAlt());
     g.fillRoundedRectangle(badgeRect, 3.0f);
     g.setColour(OmniLookAndFeel::getAccentCyan());
@@ -306,7 +332,8 @@ void PeerListComponent::paint(juce::Graphics& g)
 void PeerListComponent::resized()
 {
     auto bounds = getLocalBounds();
-    bounds.removeFromTop(32); // Header banner
+    auto topBar = bounds.removeFromTop(32); // Header banner
+    scanSubnetBtn_.setBounds(topBar.removeFromRight(82).reduced(4, 4));
 
     // Local device info banner
     localIpBannerLabel_.setBounds(bounds.removeFromTop(20).reduced(6, 1));

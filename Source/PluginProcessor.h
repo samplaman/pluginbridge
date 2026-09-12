@@ -10,11 +10,14 @@
 namespace pluginbridge
 {
 
-class PluginBridgeAudioProcessor : public juce::AudioProcessor
+class PluginBridgeAudioProcessor : public juce::AudioProcessor,
+                                   public juce::Timer
 {
 public:
     PluginBridgeAudioProcessor();
     ~PluginBridgeAudioProcessor() override;
+
+    void timerCallback() override;
 
     // AudioProcessor lifecycle
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;

@@ -276,6 +276,20 @@ void BeaconService::broadcastLoop()
             // 4. Send fallback 255.255.255.255
             sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
                    reinterpret_cast<sockaddr*>(&bcastTarget), sizeof(bcastTarget));
+
+            // 5. Send direct unicast beacons to explicitly configured peers
+            {
+                std::lock_guard<std::mutex> lock(unicastMutex_);
+                for (const auto& target : unicastTargets_)
+                {
+                    sockaddr_in directTarget {};
+                    directTarget.sin_family = AF_INET;
+                    directTarget.sin_port = htons(target.port);
+                    directTarget.sin_addr.s_addr = inet_addr(target.ip.c_str());
+                    sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
+                           reinterpret_cast<sockaddr*>(&directTarget), sizeof(directTarget));
+                }
+            }
         }
 
         pruneStalePeers();
@@ -322,6 +336,18 @@ void BeaconService::listenLoop()
                 std::lock_guard<std::mutex> lock(beaconConfigMutex_);
                 if (!peerUuid.empty() && peerUuid == localBeacon_.instanceUuid)
                     continue;
+            }
+
+            // Immediately send our beacon directly back to the sender so discovery is instant and two-way
+            if (sendSocket_ >= 0)
+            {
+                BeaconPacket replyPacket;
+                {
+                    std::lock_guard<std::mutex> lock(beaconConfigMutex_);
+                    replyPacket = localBeacon_;
+                }
+                sendto(sendSocket_, &replyPacket, sizeof(replyPacket), 0,
+                       reinterpret_cast<sockaddr*>(&senderAddr), sizeof(senderAddr));
             }
 
             bool updated = false;
@@ -410,6 +436,83 @@ std::vector<DiscoveredPeer> BeaconService::getActivePeers() const
 void BeaconService::setOnPeersUpdated(PeerCallback callback)
 {
     onPeersUpdated_ = std::move(callback);
+}
+
+void BeaconService::pingPeer(const std::string& ipAddress, uint16_t beaconPort)
+{
+    if (sendSocket_ < 0 || ipAddress.empty())
+        return;
+
+    BeaconPacket packetCopy;
+    {
+        std::lock_guard<std::mutex> lock(beaconConfigMutex_);
+        packetCopy = localBeacon_;
+    }
+
+    sockaddr_in directTarget {};
+    directTarget.sin_family = AF_INET;
+    directTarget.sin_port = htons(beaconPort);
+    directTarget.sin_addr.s_addr = inet_addr(ipAddress.c_str());
+    sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
+           reinterpret_cast<sockaddr*>(&directTarget), sizeof(directTarget));
+}
+
+void BeaconService::addUnicastTarget(const std::string& ipAddress, uint16_t beaconPort)
+{
+    if (ipAddress.empty())
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(unicastMutex_);
+        for (const auto& t : unicastTargets_)
+        {
+            if (t.ip == ipAddress && t.port == beaconPort)
+                return;
+        }
+        unicastTargets_.push_back({ ipAddress, beaconPort });
+    }
+
+    // Ping immediately
+    pingPeer(ipAddress, beaconPort);
+}
+
+void BeaconService::removeUnicastTarget(const std::string& ipAddress, uint16_t beaconPort)
+{
+    std::lock_guard<std::mutex> lock(unicastMutex_);
+    unicastTargets_.erase(std::remove_if(unicastTargets_.begin(), unicastTargets_.end(),
+        [&](const UnicastTarget& t) {
+            return t.ip == ipAddress && t.port == beaconPort;
+        }), unicastTargets_.end());
+}
+
+void BeaconService::scanSubnet()
+{
+    if (sendSocket_ < 0)
+        return;
+
+    BeaconPacket packetCopy;
+    {
+        std::lock_guard<std::mutex> lock(beaconConfigMutex_);
+        packetCopy = localBeacon_;
+    }
+
+    auto ifaces = getLocalInterfaces();
+    for (const auto& iface : ifaces)
+    {
+        uint32_t ipHost = ntohl(iface.ip.s_addr);
+        uint32_t netPrefix = ipHost & 0xFFFFFF00; // /24 subnet
+
+        for (uint32_t host = 1; host < 255; ++host)
+        {
+            uint32_t targetIp = netPrefix | host;
+            sockaddr_in directTarget {};
+            directTarget.sin_family = AF_INET;
+            directTarget.sin_port = htons(beaconPort_);
+            directTarget.sin_addr.s_addr = htonl(targetIp);
+            sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
+                   reinterpret_cast<sockaddr*>(&directTarget), sizeof(directTarget));
+        }
+    }
 }
 
 } // namespace pluginbridge

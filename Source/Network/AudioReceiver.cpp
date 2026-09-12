@@ -9,6 +9,8 @@
 #include <pthread.h>
 #include <algorithm>
 #include <cstring>
+#include <ifaddrs.h>
+#include <net/if.h>
 
 namespace pluginbridge
 {
@@ -75,6 +77,24 @@ bool AudioReceiver::start(uint16_t listenPort)
     mreq.imr_multiaddr.s_addr = inet_addr(DEFAULT_MULTICAST_GROUP);
     mreq.imr_interface.s_addr = htonl(INADDR_ANY);
     setsockopt(listenSocket_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq));
+
+    ifaddrs* ifap = nullptr;
+    if (getifaddrs(&ifap) == 0 && ifap != nullptr)
+    {
+        for (ifaddrs* ifa = ifap; ifa != nullptr; ifa = ifa->ifa_next)
+        {
+            if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET)
+                continue;
+            if ((ifa->ifa_flags & IFF_LOOPBACK) || !(ifa->ifa_flags & IFF_UP))
+                continue;
+
+            ip_mreq ifMreq {};
+            ifMreq.imr_multiaddr.s_addr = inet_addr(DEFAULT_MULTICAST_GROUP);
+            ifMreq.imr_interface = reinterpret_cast<sockaddr_in*>(ifa->ifa_addr)->sin_addr;
+            setsockopt(listenSocket_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &ifMreq, sizeof(ifMreq));
+        }
+        freeifaddrs(ifap);
+    }
 
     jitterBuffer_.reset();
     driftCompensator_.reset();

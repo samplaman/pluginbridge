@@ -243,6 +243,13 @@ PluginBridgeAudioProcessorEditor::PluginBridgeAudioProcessorEditor(PluginBridgeA
         else
             processorRef_.disconnectPeer(peer);
     });
+    peerList_.setOnPingCallback([this](const std::string& ip, uint16_t port) {
+        processorRef_.getBeaconService().addUnicastTarget(ip, port);
+        processorRef_.getBeaconService().pingPeer(ip, port);
+    });
+    peerList_.setOnScanCallback([this] {
+        processorRef_.getBeaconService().scanSubnet();
+    });
 
     addAndMakeVisible(patchbay_);
 
@@ -294,6 +301,7 @@ void PluginBridgeAudioProcessorEditor::updateTabStyles()
 void PluginBridgeAudioProcessorEditor::timerCallback()
 {
     patchbay_.updateMeters();
+    peerList_.setLocalDeviceIp(processorRef_.getBeaconService().getLocalIp(), processorRef_.getAudioPort());
     peerList_.updatePeers(processorRef_.getBeaconService().getActivePeers());
 
     currentTxMbps_ = processorRef_.getAudioSender().getCurrentBitrateKbps() / 1000.0f;

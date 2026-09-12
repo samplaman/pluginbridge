@@ -35,7 +35,17 @@ public:
     std::string getLocalIp() const;
     static std::vector<std::string> getLocalIpList();
 
+    void pingPeer(const std::string& ipAddress, uint16_t beaconPort = DEFAULT_BEACON_PORT);
+    void addUnicastTarget(const std::string& ipAddress, uint16_t beaconPort = DEFAULT_BEACON_PORT);
+    void removeUnicastTarget(const std::string& ipAddress, uint16_t beaconPort = DEFAULT_BEACON_PORT);
+    void scanSubnet();
+
 private:
+    struct UnicastTarget
+    {
+        std::string ip;
+        uint16_t port;
+    };
     void broadcastLoop();
     void listenLoop();
     void pruneStalePeers();
@@ -54,6 +64,9 @@ private:
     uint16_t beaconPort_ { DEFAULT_BEACON_PORT };
     int listenSocket_ { -1 };
     int sendSocket_ { -1 };
+
+    mutable std::mutex unicastMutex_;
+    std::vector<UnicastTarget> unicastTargets_;
 };
 
 } // namespace pluginbridge

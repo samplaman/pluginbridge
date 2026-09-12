@@ -68,13 +68,46 @@ PluginBridgeAudioProcessor::PluginBridgeAudioProcessor()
     beacon_.setInstanceDetails(instanceUuid_, instanceName_, streamName_, audioPort_,
                               RoutingMatrix::MATRIX_SIZE, 48000, 0);
     beacon_.start();
+
+    startTimerHz(10);
 }
 
 PluginBridgeAudioProcessor::~PluginBridgeAudioProcessor()
 {
+    stopTimer();
     beacon_.stop();
     sender_.stop();
     receiver_.stop();
+}
+
+void PluginBridgeAudioProcessor::timerCallback()
+{
+    auto* roleParam = apvts_.getRawParameterValue("role");
+    int roleIdx = roleParam ? static_cast<int>(roleParam->load()) : 0;
+    if (roleIdx == 0) // Duplex mode
+    {
+        uint64_t lastPkt = receiver_.getLastPacketTimeMs();
+        if (lastPkt > 0)
+        {
+            std::string inIp = receiver_.getLastSenderIp();
+            if (!inIp.empty())
+            {
+                uint16_t targetPort = DEFAULT_AUDIO_PORT;
+                for (const auto& p : beacon_.getActivePeers())
+                {
+                    if (p.ipAddress == inIp)
+                    {
+                        targetPort = p.audioPort;
+                        break;
+                    }
+                }
+                if (!sender_.hasTarget(inIp, targetPort))
+                {
+                    sender_.addTarget(inIp, targetPort);
+                }
+            }
+        }
+    }
 }
 
 void PluginBridgeAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
@@ -144,21 +177,6 @@ void PluginBridgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, 
     if (roleIdx != 1) // Not Sender Only
     {
         receiver_.readAudio(netRxPointers_.data(), RoutingMatrix::MATRIX_SIZE, numFrames);
-
-        // Auto-link return streaming for full duplex communication
-        if (roleIdx == 0) // Duplex mode
-        {
-            uint64_t lastPkt = receiver_.getLastPacketTimeMs();
-            if (lastPkt > 0)
-            {
-                std::string inIp = receiver_.getLastSenderIp();
-                uint16_t inPort = receiver_.getLastSenderPort();
-                if (!inIp.empty() && inPort != 0 && !sender_.hasTarget(inIp, inPort))
-                {
-                    sender_.addTarget(inIp, inPort);
-                }
-            }
-        }
     }
     else
     {
