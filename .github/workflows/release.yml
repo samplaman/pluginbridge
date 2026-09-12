@@ -1,0 +1,200 @@
+name: Build & Auto-Release
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for release (e.g. v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+
+jobs:
+  build-linux:
+    name: Build Linux x86_64
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            libasound2-dev \
+            libjack-jackd2-dev \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libx11-dev \
+            libxcomposite-dev \
+            libxcursor-dev \
+            libxext-dev \
+            libxinerama-dev \
+            libxrandr-dev \
+            libxrender-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            ladspa-sdk \
+            zip
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=20
+
+      - name: Build Standalone, VST3 & Test Harness
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Run Engine Test Suite
+        run: |
+          ./build/test_harness
+
+      - name: Package Linux Release Assets
+        run: |
+          mkdir -p staging-linux
+          # Copy VST3 bundle
+          if [ -d "build/PluginBridge_artefacts/Release/VST3" ]; then
+            cp -r build/PluginBridge_artefacts/Release/VST3 staging-linux/
+          elif [ -d "build/PluginBridge_artefacts/VST3" ]; then
+            cp -r build/PluginBridge_artefacts/VST3 staging-linux/
+          fi
+          # Copy Standalone executable
+          if [ -d "build/PluginBridge_artefacts/Release/Standalone" ]; then
+            cp -r build/PluginBridge_artefacts/Release/Standalone staging-linux/
+          elif [ -d "build/PluginBridge_artefacts/Standalone" ]; then
+            cp -r build/PluginBridge_artefacts/Standalone staging-linux/
+          fi
+          # Copy test harness
+          if [ -f "build/test_harness" ]; then
+            cp build/test_harness staging-linux/
+          fi
+          cd staging-linux
+          tar -czvf ../PluginBridge-Linux-x86_64.tar.gz *
+          zip -r ../PluginBridge-Linux-x86_64.zip *
+          cd ..
+          ls -la PluginBridge-Linux-x86_64.*
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PluginBridge-Linux-x86_64
+          path: |
+            PluginBridge-Linux-x86_64.tar.gz
+            PluginBridge-Linux-x86_64.zip
+          retention-days: 14
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          brew install ninja || true
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=20
+
+      - name: Build Standalone, VST3, AU & Test Harness
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Run Engine Test Suite
+        run: |
+          ./build/test_harness
+
+      - name: Package macOS Release Assets
+        run: |
+          mkdir -p staging-macos
+          if [ -d "build/PluginBridge_artefacts/Release/Standalone/PluginBridge.app" ]; then
+            cp -R build/PluginBridge_artefacts/Release/Standalone/PluginBridge.app staging-macos/
+          fi
+          if [ -d "build/PluginBridge_artefacts/Release/VST3/PluginBridge.vst3" ]; then
+            cp -R build/PluginBridge_artefacts/Release/VST3/PluginBridge.vst3 staging-macos/
+          fi
+          if [ -d "build/PluginBridge_artefacts/Release/AU/PluginBridge.component" ]; then
+            cp -R build/PluginBridge_artefacts/Release/AU/PluginBridge.component staging-macos/
+          fi
+          if [ -f "build/test_harness" ]; then
+            cp build/test_harness staging-macos/
+          fi
+          cd staging-macos
+          zip -r ../PluginBridge-macOS.zip *
+          cd ..
+          ls -la PluginBridge-macOS.zip
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PluginBridge-macOS
+          path: PluginBridge-macOS.zip
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-linux, build-macos]
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true
+
+      - name: List Release Assets
+        run: ls -la release-assets/
+
+      - name: Determine Tag & Release Name
+        id: release_info
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "title=PluginBridge $TAG" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.tag_name }}" != "" ]]; then
+            TAG="${{ inputs.tag_name }}"
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "title=PluginBridge $TAG" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "title=PluginBridge Continuous Build (Latest)" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_info.outputs.tag }}
+          name: ${{ steps.release_info.outputs.title }}
+          prerelease: ${{ steps.release_info.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
