@@ -1,0 +1,10 @@
+.DS_Store
+build/
+cmake-build-*/
+.tools/
+*.user
+*.xcuserstate
+.idea/
+.vscode/
+test_harness
+
