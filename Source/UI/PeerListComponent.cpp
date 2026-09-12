@@ -122,7 +122,7 @@ PeerListComponent::PeerListComponent()
     manualLabel_.setColour(juce::Label::textColourId, OmniLookAndFeel::getTextSecondary());
 
     addAndMakeVisible(ipEditor_);
-    ipEditor_.setText("192.168.1.50");
+    ipEditor_.setText("192.168.1.18");
     ipEditor_.setFont(juce::Font(juce::FontOptions().withHeight(11.0f)));
 
     addAndMakeVisible(portEditor_);

@@ -16,8 +16,8 @@ DriftCompensator::DriftCompensator(int maxChannels)
 void DriftCompensator::reset()
 {
     errorIntegral_ = 0.0f;
-    targetSpeedRatio_ = 1.0f;
-    currentSpeedRatio_ = 1.0f;
+    targetSpeedRatio_ = nominalRatio_;
+    currentSpeedRatio_ = nominalRatio_;
     fractionalPhase_ = 0.0;
     for (int ch = 0; ch < maxChannels_; ++ch)
     {
@@ -28,6 +28,21 @@ void DriftCompensator::reset()
 void DriftCompensator::setTargetBufferFrames(int targetFrames)
 {
     targetBufferFrames_ = std::max(64, targetFrames);
+}
+
+void DriftCompensator::setNominalRatio(double ratio)
+{
+    if (ratio > 0.1 && ratio < 10.0)
+    {
+        float r = static_cast<float>(ratio);
+        if (std::abs(r - nominalRatio_) > 0.0005f)
+        {
+            nominalRatio_ = r;
+            targetSpeedRatio_ = r;
+            currentSpeedRatio_ = r;
+            errorIntegral_ = 0.0f;
+        }
+    }
 }
 
 float DriftCompensator::cubicInterpolate(float y0, float y1, float y2, float y3, float mu) const
@@ -52,10 +67,12 @@ int DriftCompensator::process(const float* const* inputChannels, int numInputFra
     // PI controller tracking buffer occupancy
     float error = static_cast<float>(currentBufferFill - targetBufferFrames_);
     errorIntegral_ += error * 0.000005f;
-    errorIntegral_ = std::clamp(errorIntegral_, -0.0005f, 0.0005f);
+    errorIntegral_ = std::clamp(errorIntegral_, -0.005f, 0.005f);
 
     float delta = error * 0.00002f + errorIntegral_;
-    targetSpeedRatio_ = std::clamp(1.0f + delta, 0.9990f, 1.0010f);
+    // Modulate around nominal ratio with +/- 2% clock drift adjustment
+    float baseRatio = nominalRatio_;
+    targetSpeedRatio_ = std::clamp(baseRatio * (1.0f + delta), baseRatio * 0.98f, baseRatio * 1.02f);
 
     // Exponential smoothing to avoid sudden pitch shifts
     currentSpeedRatio_ = 0.98f * currentSpeedRatio_ + 0.02f * targetSpeedRatio_;

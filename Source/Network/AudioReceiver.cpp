@@ -151,8 +151,18 @@ void AudioReceiver::readAudio(float* const* channels, int numChannels, int numFr
     if (channels == nullptr || numChannels <= 0 || numFrames <= 0)
         return;
 
+    uint32_t remRate = remoteSampleRate_.load(std::memory_order_relaxed);
+    uint32_t locRate = localSampleRate_.load(std::memory_order_relaxed);
+    if (remRate > 0 && locRate > 0)
+    {
+        driftCompensator_.setNominalRatio(static_cast<double>(remRate) / static_cast<double>(locRate));
+    }
+
+    float speedRatio = driftCompensator_.getCurrentSpeedRatio();
+    int inputFramesToRead = static_cast<int>(std::ceil(numFrames * std::max(1.0f, speedRatio))) + 48;
+
     // Need enough scratch capacity
-    int maxReq = std::max(numFrames * 2, 256);
+    int maxReq = std::max(inputFramesToRead * 2, 512);
     if (static_cast<int>(scratchBuffer_[0].size()) < maxReq)
     {
         for (int ch = 0; ch < MAX_CHANNELS; ++ch)
@@ -163,7 +173,6 @@ void AudioReceiver::readAudio(float* const* channels, int numChannels, int numFr
     }
 
     // Read raw frames from jitter buffer
-    int inputFramesToRead = numFrames + 32; // Allow small headroom for drift adjustment
     jitterBuffer_.readFrames(scratchPointers_.data(), numChannels, inputFramesToRead);
 
     // Apply drift compensation / fractional resampling
@@ -223,6 +232,10 @@ void AudioReceiver::receiveWorkerLoop()
                     lastSenderPort_ = senderPort;
                 }
                 lastPacketTimeMs_.store(getCurrentTimeMs(), std::memory_order_relaxed);
+                if (header->sampleRate > 0)
+                {
+                    remoteSampleRate_.store(header->sampleRate, std::memory_order_relaxed);
+                }
 
                 // Check filter if set
                 std::string filter;

@@ -6,6 +6,7 @@
 #include "Network/AudioSender.h"
 #include "Network/AudioReceiver.h"
 #include "DSP/RoutingMatrix.h"
+#include <unordered_set>
 
 namespace pluginbridge
 {
@@ -97,6 +98,9 @@ private:
 
     std::vector<const float*> dawInPointers_;
     std::vector<float*> dawOutPointers_;
+
+    std::mutex peerDisconnectMutex_;
+    std::unordered_set<std::string> userDisconnectedPeers_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginBridgeAudioProcessor)
 };

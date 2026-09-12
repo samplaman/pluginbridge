@@ -16,6 +16,8 @@ public:
 
     void reset();
     void setTargetBufferFrames(int targetFrames);
+    void setNominalRatio(double ratio);
+    float getNominalRatio() const { return nominalRatio_; }
 
     /**
      * Process audio through fractional resampler adjusting for clock drift.
@@ -38,6 +40,7 @@ private:
 
     const int maxChannels_;
     int targetBufferFrames_ { 384 }; // e.g. 3 packets of 128 frames
+    float nominalRatio_ { 1.0f };
 
     // PI controller state
     float errorIntegral_ { 0.0f };

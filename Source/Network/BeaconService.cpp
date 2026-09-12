@@ -135,23 +135,7 @@ void BeaconService::start(uint16_t beaconPort)
 
     beaconPort_ = beaconPort;
 
-    // Create UDP send socket
-    sendSocket_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sendSocket_ >= 0)
-    {
-        int broadcastEnable = 1;
-        setsockopt(sendSocket_, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
-
-        // Multicast loopback enabled so local instances on same computer can discover each other
-        uint8_t loop = 1;
-        setsockopt(sendSocket_, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
-
-        // Multicast TTL = 2 for local subnet traversal
-        uint8_t ttl = 2;
-        setsockopt(sendSocket_, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
-    }
-
-    // Create UDP listen socket
+    // Create single bidirectional UDP socket on beaconPort_ (52800)
     listenSocket_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (listenSocket_ >= 0)
     {
@@ -160,6 +144,15 @@ void BeaconService::start(uint16_t beaconPort)
 #ifdef SO_REUSEPORT
         setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
 #endif
+
+        int broadcastEnable = 1;
+        setsockopt(listenSocket_, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable));
+
+        uint8_t loop = 1;
+        setsockopt(listenSocket_, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+
+        uint8_t ttl = 2;
+        setsockopt(listenSocket_, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
 
         sockaddr_in bindAddr {};
         bindAddr.sin_family = AF_INET;
@@ -191,6 +184,8 @@ void BeaconService::start(uint16_t beaconPort)
         }
     }
 
+    sendSocket_ = listenSocket_;
+
     broadcastThread_ = std::thread(&BeaconService::broadcastLoop, this);
     listenThread_ = std::thread(&BeaconService::listenLoop, this);
 }
@@ -204,10 +199,6 @@ void BeaconService::stop()
     {
         close(listenSocket_);
         listenSocket_ = -1;
-    }
-    if (sendSocket_ >= 0)
-    {
-        close(sendSocket_);
         sendSocket_ = -1;
     }
 
@@ -455,10 +446,14 @@ void BeaconService::listenLoop()
                 }
             }
 
-            if (updated && onPeersUpdated_)
+            if (updated)
             {
-                auto currentPeers = getActivePeers();
-                onPeersUpdated_(currentPeers);
+                addUnicastTarget(senderIp, beaconPort_);
+                if (onPeersUpdated_)
+                {
+                    auto currentPeers = getActivePeers();
+                    onPeersUpdated_(currentPeers);
+                }
             }
 
             uint8_t flag = packet.role & (BEACON_FLAG_LINK | BEACON_FLAG_UNLINK);
@@ -472,7 +467,26 @@ void BeaconService::listenLoop()
                 cmdPeer.audioPort = packet.audioPort;
                 cmdPeer.numChannels = packet.numChannels;
                 cmdPeer.sampleRate = packet.sampleRate;
-                onLinkCommand_(cmdPeer, (flag & BEACON_FLAG_LINK) != 0);
+                bool isConnect = (flag & BEACON_FLAG_LINK) != 0;
+                onLinkCommand_(cmdPeer, isConnect);
+
+                // Send bidirectional link acknowledgment back so both sides link reliably
+                if (!isReply && sendSocket_ >= 0)
+                {
+                    BeaconPacket ackPacket;
+                    {
+                        std::lock_guard<std::mutex> lock(beaconConfigMutex_);
+                        ackPacket = localBeacon_;
+                    }
+                    ackPacket.role = (ackPacket.role & BEACON_ROLE_MASK) | (isConnect ? BEACON_FLAG_LINK : BEACON_FLAG_UNLINK) | BEACON_FLAG_REPLY;
+
+                    sockaddr_in replyAddr {};
+                    replyAddr.sin_family = AF_INET;
+                    replyAddr.sin_port = htons(beaconPort_);
+                    replyAddr.sin_addr.s_addr = inet_addr(senderIp.c_str());
+                    sendto(sendSocket_, &ackPacket, sizeof(ackPacket), 0,
+                           reinterpret_cast<sockaddr*>(&replyAddr), sizeof(replyAddr));
+                }
             }
         }
     }
@@ -539,8 +553,14 @@ void BeaconService::sendLinkCommand(const std::string& ipAddress, uint16_t beaco
     directTarget.sin_family = AF_INET;
     directTarget.sin_port = htons(beaconPort);
     directTarget.sin_addr.s_addr = inet_addr(ipAddress.c_str());
-    sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
-           reinterpret_cast<sockaddr*>(&directTarget), sizeof(directTarget));
+
+    for (int i = 0; i < 3; ++i)
+    {
+        sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
+               reinterpret_cast<sockaddr*>(&directTarget), sizeof(directTarget));
+        if (i < 2)
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    }
 }
 
 void BeaconService::pingPeer(const std::string& ipAddress, uint16_t beaconPort)
@@ -619,6 +639,7 @@ void BeaconService::scanSubnet()
             directTarget.sin_addr.s_addr = htonl(targetIp);
             sendto(sendSocket_, &packetCopy, sizeof(packetCopy), 0,
                    reinterpret_cast<sockaddr*>(&directTarget), sizeof(directTarget));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
     }
 }

@@ -42,6 +42,9 @@ public:
     float getCurrentSpeedRatio() const;
     float getBitrateKbps() const;
 
+    void setLocalSampleRate(uint32_t rate) { localSampleRate_.store(rate); }
+    uint32_t getRemoteSampleRate() const { return remoteSampleRate_.load(); }
+
     std::string getLastSenderIp() const;
     uint16_t getLastSenderPort() const;
     uint64_t getLastPacketTimeMs() const;
@@ -54,6 +57,9 @@ private:
 
     uint16_t listenPort_ { DEFAULT_AUDIO_PORT };
     int listenSocket_ { -1 };
+
+    std::atomic<uint32_t> localSampleRate_ { 48000 };
+    std::atomic<uint32_t> remoteSampleRate_ { 48000 };
 
     std::string targetStreamId_;
     mutable std::mutex streamFilterMutex_;

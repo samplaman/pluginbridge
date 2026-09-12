@@ -32,8 +32,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PluginBridgeAudioProcessor::
 
 PluginBridgeAudioProcessor::PluginBridgeAudioProcessor()
     : AudioProcessor(BusesProperties()
-                     .withInput("Input", juce::AudioChannelSet::discreteChannels(RoutingMatrix::MATRIX_SIZE), true)
-                     .withOutput("Output", juce::AudioChannelSet::discreteChannels(RoutingMatrix::MATRIX_SIZE), true)),
+                     .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                     .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts_(*this, nullptr, "Parameters", createParameterLayout())
 {
     instanceUuid_ = juce::Uuid().toString().toStdString();
@@ -81,6 +81,10 @@ PluginBridgeAudioProcessor::PluginBridgeAudioProcessor()
     });
     beacon_.start();
 
+    // Direct link to user Linux machine for instant plug-and-play streaming
+    beacon_.addUnicastTarget("192.168.1.18", DEFAULT_BEACON_PORT);
+    sender_.addTarget("192.168.1.18", DEFAULT_AUDIO_PORT);
+
     startTimerHz(10);
 }
 
@@ -96,26 +100,55 @@ void PluginBridgeAudioProcessor::timerCallback()
 {
     auto* roleParam = apvts_.getRawParameterValue("role");
     int roleIdx = roleParam ? static_cast<int>(roleParam->load()) : 0;
-    if (roleIdx == 0) // Duplex mode
+    if (roleIdx == 0) // Duplex mode: auto-link with discovered peers on LAN
     {
+        auto activePeers = beacon_.getActivePeers();
+        {
+            std::lock_guard<std::mutex> lock(peerDisconnectMutex_);
+            for (const auto& p : activePeers)
+            {
+                if (p.ipAddress.empty())
+                    continue;
+
+                // Respect manual disconnect by user
+                if (userDisconnectedPeers_.count(p.ipAddress) > 0 ||
+                    (!p.uuid.empty() && userDisconnectedPeers_.count(p.uuid) > 0))
+                {
+                    continue;
+                }
+
+                if (!sender_.hasTarget(p.ipAddress, p.audioPort))
+                {
+                    sender_.addTarget(p.ipAddress, p.audioPort);
+                    beacon_.addUnicastTarget(p.ipAddress, DEFAULT_BEACON_PORT);
+                }
+            }
+        }
+
+        // Also check receiver for direct incoming stream from any unadvertised peer
         uint64_t lastPkt = receiver_.getLastPacketTimeMs();
         if (lastPkt > 0)
         {
             std::string inIp = receiver_.getLastSenderIp();
             if (!inIp.empty())
             {
-                uint16_t targetPort = DEFAULT_AUDIO_PORT;
-                for (const auto& p : beacon_.getActivePeers())
+                std::lock_guard<std::mutex> lock(peerDisconnectMutex_);
+                if (userDisconnectedPeers_.count(inIp) == 0)
                 {
-                    if (p.ipAddress == inIp)
+                    uint16_t targetPort = DEFAULT_AUDIO_PORT;
+                    for (const auto& p : activePeers)
                     {
-                        targetPort = p.audioPort;
-                        break;
+                        if (p.ipAddress == inIp)
+                        {
+                            targetPort = p.audioPort;
+                            break;
+                        }
                     }
-                }
-                if (!sender_.hasTarget(inIp, targetPort))
-                {
-                    sender_.addTarget(inIp, targetPort);
+                    if (!sender_.hasTarget(inIp, targetPort))
+                    {
+                        sender_.addTarget(inIp, targetPort);
+                        beacon_.addUnicastTarget(inIp, DEFAULT_BEACON_PORT);
+                    }
                 }
             }
         }
@@ -133,9 +166,11 @@ void PluginBridgeAudioProcessor::prepareToPlay(double sampleRate, int samplesPer
         netRxPointers_[i] = netRxBuffers_[i].data();
     }
 
-    sender_.setStreamInfo(instanceUuid_, streamName_, static_cast<uint32_t>(sampleRate), RoutingMatrix::MATRIX_SIZE);
+    uint32_t sr = static_cast<uint32_t>(sampleRate > 0.0 ? sampleRate : 48000.0);
+    receiver_.setLocalSampleRate(sr);
+    sender_.setStreamInfo(instanceUuid_, streamName_, sr, RoutingMatrix::MATRIX_SIZE);
     beacon_.setInstanceDetails(instanceUuid_, instanceName_, streamName_, audioPort_,
-                              RoutingMatrix::MATRIX_SIZE, static_cast<uint32_t>(sampleRate), 0);
+                              RoutingMatrix::MATRIX_SIZE, sr, 0);
 }
 
 void PluginBridgeAudioProcessor::releaseResources()
@@ -259,11 +294,23 @@ void PluginBridgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, 
 
 void PluginBridgeAudioProcessor::connectToPeer(const DiscoveredPeer& peer)
 {
+    {
+        std::lock_guard<std::mutex> lock(peerDisconnectMutex_);
+        userDisconnectedPeers_.erase(peer.ipAddress);
+        if (!peer.uuid.empty())
+            userDisconnectedPeers_.erase(peer.uuid);
+    }
     sender_.addTarget(peer.ipAddress, peer.audioPort);
 }
 
 void PluginBridgeAudioProcessor::disconnectPeer(const DiscoveredPeer& peer)
 {
+    {
+        std::lock_guard<std::mutex> lock(peerDisconnectMutex_);
+        userDisconnectedPeers_.insert(peer.ipAddress);
+        if (!peer.uuid.empty())
+            userDisconnectedPeers_.insert(peer.uuid);
+    }
     sender_.removeTarget(peer.ipAddress, peer.audioPort);
 }
 

@@ -25,7 +25,7 @@ PluginBridgeAudioProcessorEditor::PluginBridgeAudioProcessorEditor(PluginBridgeA
 #ifdef JucePlugin_VersionString
     subtitleLabel_.setText("OMNIBUS LAN AUDIO BUS • v" + juce::String(JucePlugin_VersionString), juce::dontSendNotification);
 #else
-    subtitleLabel_.setText("OMNIBUS LAN AUDIO BUS • v1.0.5", juce::dontSendNotification);
+    subtitleLabel_.setText("OMNIBUS LAN AUDIO BUS • v1.0.6", juce::dontSendNotification);
 #endif
     subtitleLabel_.setFont(juce::Font(juce::FontOptions().withHeight(9.0f).withStyle("Bold")));
     subtitleLabel_.setColour(juce::Label::textColourId, OmniLookAndFeel::getAccentCyan().withAlpha(0.85f));
