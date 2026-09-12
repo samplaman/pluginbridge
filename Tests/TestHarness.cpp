@@ -80,6 +80,10 @@ void testRoutingMatrix()
     assert(matrix.getDawInPeak(0) > 0.49f);
     assert(matrix.getDawOutPeak(0) > 0.24f);
 
+    // Check available channel auto-tracking
+    assert(matrix.getNumAvailableDawInputs() == 2);
+    assert(matrix.getNumAvailableDawOutputs() == 2);
+
     std::cout << "  ✓ RoutingMatrix matrix routing and metering verified.\n";
 }
 

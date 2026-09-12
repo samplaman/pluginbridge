@@ -210,6 +210,11 @@ void RoutingMatrix::process(const float* const* dawIn, int numDawIn,
     if (numFrames <= 0)
         return;
 
+    if (numDawIn > 0)
+        availableDawIn_.store(numDawIn, std::memory_order_relaxed);
+    if (numDawOut > 0)
+        availableDawOut_.store(numDawOut, std::memory_order_relaxed);
+
     // Clear network TX buffers
     for (int txCh = 0; txCh < numNetTx; ++txCh)
     {

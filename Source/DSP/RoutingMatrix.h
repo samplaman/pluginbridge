@@ -76,7 +76,15 @@ public:
     float getNetworkRxPeak(int ch) const;
     float getDawOutPeak(int ch) const;
 
+    int getNumAvailableDawInputs() const { return availableDawIn_.load(std::memory_order_relaxed); }
+    void setNumAvailableDawInputs(int count) { availableDawIn_.store(count, std::memory_order_relaxed); }
+
+    int getNumAvailableDawOutputs() const { return availableDawOut_.load(std::memory_order_relaxed); }
+    void setNumAvailableDawOutputs(int count) { availableDawOut_.store(count, std::memory_order_relaxed); }
+
 private:
+    std::atomic<int> availableDawIn_ { 2 };
+    std::atomic<int> availableDawOut_ { 2 };
     // Crosspoint boolean tables (16 x 16)
     std::array<std::array<std::atomic<bool>, MATRIX_SIZE>, MATRIX_SIZE> inToTx_;
     std::array<std::array<std::atomic<bool>, MATRIX_SIZE>, MATRIX_SIZE> rxToOut_;

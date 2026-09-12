@@ -22,6 +22,7 @@ public:
 
     enum class BankView
     {
+        Auto,       // Auto-detect and show available DAW channels
         Bank1_16,   // Channels 1 - 16
         Bank17_32,  // Channels 17 - 32
         Bank33_48,  // Channels 33 - 48
@@ -55,9 +56,10 @@ public:
 private:
     RoutingMatrix& matrix_;
     MatrixMode currentMode_ { MatrixMode::DawInToNetworkTx };
-    BankView currentBank_ { BankView::Bank1_16 };
+    BankView currentBank_ { BankView::Auto };
 
     // Bank buttons
+    juce::TextButton bankAutoBtn_;
     juce::TextButton bank1Btn_;
     juce::TextButton bank2Btn_;
     juce::TextButton bank3Btn_;
@@ -78,6 +80,7 @@ private:
     int hoveredHeaderCol_ { -1 };
     bool isDragging_ { false };
     bool dragSetState_ { true };
+    int lastReportedAvail_ { -1 };
 
     int getVisibleChannels() const;
     int getStartChannel() const;

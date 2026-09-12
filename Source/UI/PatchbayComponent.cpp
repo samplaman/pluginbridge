@@ -17,6 +17,10 @@ PatchbayComponent::PatchbayComponent(RoutingMatrix& matrix)
     }
 
     // Bank buttons
+    addAndMakeVisible(bankAutoBtn_);
+    bankAutoBtn_.setButtonText("AUTO");
+    bankAutoBtn_.onClick = [this] { setBankView(BankView::Auto); };
+
     addAndMakeVisible(bank1Btn_);
     bank1Btn_.setButtonText("1-16");
     bank1Btn_.onClick = [this] { setBankView(BankView::Bank1_16); };
@@ -46,6 +50,7 @@ PatchbayComponent::PatchbayComponent(RoutingMatrix& matrix)
 void PatchbayComponent::setMode(MatrixMode mode)
 {
     currentMode_ = mode;
+    resized();
     repaint();
 }
 
@@ -64,6 +69,7 @@ void PatchbayComponent::updateBankButtonStyles()
         btn.setColour(juce::TextButton::textColourOffId, active ? OmniLookAndFeel::getAccentCyan() : OmniLookAndFeel::getTextSecondary());
     };
 
+    setBtnStyle(bankAutoBtn_, currentBank_ == BankView::Auto);
     setBtnStyle(bank1Btn_, currentBank_ == BankView::Bank1_16);
     setBtnStyle(bank2Btn_, currentBank_ == BankView::Bank17_32);
     setBtnStyle(bank3Btn_, currentBank_ == BankView::Bank33_48);
@@ -72,6 +78,13 @@ void PatchbayComponent::updateBankButtonStyles()
 
 int PatchbayComponent::getVisibleChannels() const
 {
+    if (currentBank_ == BankView::Auto)
+    {
+        int avail = (currentMode_ == MatrixMode::NetworkRxToDawOut)
+                    ? matrix_.getNumAvailableDawOutputs()
+                    : matrix_.getNumAvailableDawInputs();
+        return std::clamp(avail, 2, 48);
+    }
     return (currentBank_ == BankView::All_48) ? 48 : 16;
 }
 
@@ -79,6 +92,7 @@ int PatchbayComponent::getStartChannel() const
 {
     switch (currentBank_)
     {
+        case BankView::Auto:      return 0;
         case BankView::Bank1_16:  return 0;
         case BankView::Bank17_32: return 16;
         case BankView::Bank33_48: return 32;
@@ -89,6 +103,21 @@ int PatchbayComponent::getStartChannel() const
 
 void PatchbayComponent::updateMeters()
 {
+    int avail = (currentMode_ == MatrixMode::NetworkRxToDawOut)
+                ? matrix_.getNumAvailableDawOutputs()
+                : matrix_.getNumAvailableDawInputs();
+
+    if (avail != lastReportedAvail_)
+    {
+        lastReportedAvail_ = avail;
+        bankAutoBtn_.setButtonText("AUTO (" + juce::String(avail) + " CH)");
+        if (currentBank_ == BankView::Auto)
+        {
+            resized();
+            repaint();
+        }
+    }
+
     for (size_t i = 0; i < RoutingMatrix::MATRIX_SIZE; ++i)
     {
         int ch = static_cast<int>(i);
@@ -118,7 +147,7 @@ void PatchbayComponent::updateMeters()
 
 juce::Rectangle<int> PatchbayComponent::getGridBounds() const
 {
-    int leftMargin = (currentBank_ == BankView::All_48) ? 46 : 124;
+    int leftMargin = (getVisibleChannels() > 16) ? 46 : 124;
     int topMargin = 58;
     return juce::Rectangle<int>(leftMargin, topMargin, getWidth() - leftMargin - 10, getHeight() - topMargin - 8);
 }
@@ -166,18 +195,19 @@ void PatchbayComponent::resized()
     float cellH = static_cast<float>(grid.getHeight()) / fVisibleCount;
 
     // Bank buttons at top left
-    bank1Btn_.setBounds(10, 8, 44, 22);
-    bank2Btn_.setBounds(58, 8, 44, 22);
-    bank3Btn_.setBounds(106, 8, 44, 22);
-    bankAllBtn_.setBounds(154, 8, 52, 22);
-    btnAudioIfMap_.setBounds(212, 8, 92, 22);
+    bankAutoBtn_.setBounds(10, 8, 76, 22);
+    bank1Btn_.setBounds(90, 8, 44, 22);
+    bank2Btn_.setBounds(138, 8, 44, 22);
+    bank3Btn_.setBounds(186, 8, 44, 22);
+    bankAllBtn_.setBounds(234, 8, 52, 22);
+    btnAudioIfMap_.setBounds(290, 8, 92, 22);
 
     // Position source & destination meters
     for (size_t i = 0; i < RoutingMatrix::MATRIX_SIZE; ++i)
     {
         int chIdx = static_cast<int>(i);
         bool isVisible = (chIdx >= startCh && chIdx < startCh + visibleCount);
-        if (currentBank_ == BankView::All_48)
+        if (visibleCount > 16)
         {
             if (sourceMeters_[i])
             {
@@ -233,6 +263,9 @@ void PatchbayComponent::paint(juce::Graphics& g)
     // Background
     g.fillAll(OmniLookAndFeel::getSurface());
 
+    int availIn = matrix_.getNumAvailableDawInputs();
+    int availOut = matrix_.getNumAvailableDawOutputs();
+
     // Active mode badge on right
     juce::Colour activeColor;
     juce::String srcLabel, dstLabel, modeName;
@@ -245,7 +278,7 @@ void PatchbayComponent::paint(juce::Graphics& g)
             activeColor = OmniLookAndFeel::getAccentCyan();
             srcLabel = "IN";
             dstLabel = "TX";
-            modeName = "TX MATRIX (48 CH)";
+            modeName = "TX MATRIX (" + juce::String(availIn) + " CH IN)";
             rowsAreInputs = true;
             colsAreOutputs = false;
             break;
@@ -253,7 +286,7 @@ void PatchbayComponent::paint(juce::Graphics& g)
             activeColor = OmniLookAndFeel::getAccentAmber();
             srcLabel = "RX";
             dstLabel = "OUT";
-            modeName = "RX MATRIX (48 CH)";
+            modeName = "RX MATRIX (" + juce::String(availOut) + " CH OUT)";
             rowsAreInputs = false;
             colsAreOutputs = true;
             break;
@@ -261,19 +294,22 @@ void PatchbayComponent::paint(juce::Graphics& g)
             activeColor = OmniLookAndFeel::getAccentGreen();
             srcLabel = "IN";
             dstLabel = "OUT";
-            modeName = "THRU MATRIX (48 CH)";
+            modeName = "THRU MATRIX (" + juce::String(availIn) + " IN / " + juce::String(availOut) + " OUT)";
             rowsAreInputs = true;
             colsAreOutputs = true;
             break;
     }
 
-    auto modeBadge = juce::Rectangle<float>(static_cast<float>(getWidth() - 134), 8.0f, 124.0f, 22.0f);
+    g.setFont(juce::Font(juce::FontOptions().withHeight(9.5f).withStyle("Bold")));
+    juce::GlyphArrangement ga;
+    ga.addLineOfText(g.getCurrentFont(), modeName, 0.0f, 0.0f);
+    float badgeW = std::max(124.0f, ga.getBoundingBox(0, -1, true).getWidth() + 18.0f);
+    auto modeBadge = juce::Rectangle<float>(static_cast<float>(getWidth()) - badgeW - 10.0f, 8.0f, badgeW, 22.0f);
     g.setColour(OmniLookAndFeel::getSurfaceAlt());
     g.fillRoundedRectangle(modeBadge, 3.0f);
     g.setColour(OmniLookAndFeel::getBorder());
     g.drawRoundedRectangle(modeBadge, 3.0f, 1.0f);
 
-    g.setFont(juce::Font(juce::FontOptions().withHeight(9.5f).withStyle("Bold")));
     g.setColour(activeColor);
     g.drawText(modeName, modeBadge.toNearestInt(), juce::Justification::centred);
 
@@ -303,7 +339,7 @@ void PatchbayComponent::paint(juce::Graphics& g)
     }
 
     // Column Headers (Destinations)
-    float headerFontH = (currentBank_ == BankView::All_48) ? 8.0f : 9.5f;
+    float headerFontH = (visibleCount > 16) ? 8.0f : 9.5f;
     g.setFont(juce::Font(juce::FontOptions().withHeight(headerFontH).withStyle("Bold")));
 
     for (int localCol = 0; localCol < visibleCount; ++localCol)
@@ -319,9 +355,16 @@ void PatchbayComponent::paint(juce::Graphics& g)
             g.fillRoundedRectangle(colHdrBounds.toFloat(), 3.0f);
         }
 
-        g.setColour(isHovered ? activeColor : OmniLookAndFeel::getTextSecondary());
+        bool colAvail = true;
+        if (colsAreOutputs)
+        {
+            int hwOut = matrix_.getOutputChannelMap(globalCol);
+            colAvail = (hwOut < availOut);
+        }
 
-        if (currentBank_ != BankView::All_48)
+        g.setColour(isHovered ? activeColor : (colAvail ? OmniLookAndFeel::getTextSecondary() : OmniLookAndFeel::getTextSecondary().withAlpha(0.35f)));
+
+        if (visibleCount <= 16)
         {
             juce::String colText = dstLabel + " " + juce::String::formatted("%02d", globalCol + 1);
             g.drawText(colText, x - 4, 12, static_cast<int>(cellW) + 8, 14, juce::Justification::centred);
@@ -329,9 +372,9 @@ void PatchbayComponent::paint(juce::Graphics& g)
             if (colsAreOutputs)
             {
                 int hwOut = matrix_.getOutputChannelMap(globalCol) + 1;
-                juce::String ifText = "[IF " + juce::String::formatted("%02d", hwOut) + "]";
+                juce::String ifText = colAvail ? ("[IF " + juce::String::formatted("%02d", hwOut) + "]") : "[NO OUT]";
                 g.setFont(juce::Font(juce::FontOptions().withHeight(8.0f).withStyle("Bold")));
-                g.setColour(activeColor.withAlpha(0.85f));
+                g.setColour(colAvail ? activeColor.withAlpha(0.85f) : OmniLookAndFeel::getTextSecondary().withAlpha(0.35f));
                 g.drawText(ifText, x - 4, 26, static_cast<int>(cellW) + 8, 12, juce::Justification::centred);
                 g.setFont(juce::Font(juce::FontOptions().withHeight(headerFontH).withStyle("Bold")));
             }
@@ -341,12 +384,12 @@ void PatchbayComponent::paint(juce::Graphics& g)
             int chNum = globalCol + 1;
             if (chNum == 1 || chNum % 8 == 1)
             {
-                g.setColour(activeColor);
+                g.setColour(colAvail ? activeColor : activeColor.withAlpha(0.35f));
                 g.drawText(juce::String(chNum), x - 2, 22, static_cast<int>(cellW * 2.0f) + 6, 13, juce::Justification::left);
             }
             else if (chNum % 4 == 1)
             {
-                g.setColour(OmniLookAndFeel::getTextSecondary());
+                g.setColour(colAvail ? OmniLookAndFeel::getTextSecondary() : OmniLookAndFeel::getTextSecondary().withAlpha(0.35f));
                 g.drawText(juce::String(chNum), x - 2, 22, static_cast<int>(cellW * 2.0f) + 6, 13, juce::Justification::left);
             }
         }
@@ -366,15 +409,22 @@ void PatchbayComponent::paint(juce::Graphics& g)
             g.fillRoundedRectangle(rowHdrBounds.toFloat(), 3.0f);
         }
 
-        g.setColour(isHovered ? activeColor : OmniLookAndFeel::getTextSecondary());
+        bool rowAvail = true;
+        if (rowsAreInputs)
+        {
+            int hwIn = matrix_.getInputChannelMap(globalRow);
+            rowAvail = (hwIn < availIn);
+        }
 
-        if (currentBank_ != BankView::All_48)
+        g.setColour(isHovered ? activeColor : (rowAvail ? OmniLookAndFeel::getTextPrimary() : OmniLookAndFeel::getTextSecondary().withAlpha(0.35f)));
+
+        if (visibleCount <= 16)
         {
             juce::String rowText = srcLabel + " " + juce::String::formatted("%02d", globalRow + 1);
             if (rowsAreInputs)
             {
                 int hwIn = matrix_.getInputChannelMap(globalRow) + 1;
-                rowText += " [IF " + juce::String::formatted("%02d", hwIn) + "]";
+                rowText += rowAvail ? (" [IF " + juce::String::formatted("%02d", hwIn) + "]") : " [NO IN]";
             }
             g.drawText(rowText, 4, y, grid.getX() - 20, static_cast<int>(cellH), juce::Justification::centredRight);
         }
@@ -382,9 +432,9 @@ void PatchbayComponent::paint(juce::Graphics& g)
         {
             int chNum = globalRow + 1;
             if (chNum == 1 || chNum % 8 == 1)
-                g.setColour(activeColor);
+                g.setColour(rowAvail ? activeColor : activeColor.withAlpha(0.35f));
             else
-                g.setColour(OmniLookAndFeel::getTextSecondary());
+                g.setColour(rowAvail ? OmniLookAndFeel::getTextSecondary() : OmniLookAndFeel::getTextSecondary().withAlpha(0.35f));
 
             if (chNum == 1 || chNum % 4 == 1)
             {
@@ -416,9 +466,14 @@ void PatchbayComponent::paint(juce::Graphics& g)
     for (int localRow = 0; localRow < visibleCount; ++localRow)
     {
         int globalRow = startCh + localRow;
+        bool rowAvail = (!rowsAreInputs) || (matrix_.getInputChannelMap(globalRow) < availIn);
+
         for (int localCol = 0; localCol < visibleCount; ++localCol)
         {
             int globalCol = startCh + localCol;
+            bool colAvail = (!colsAreOutputs) || (matrix_.getOutputChannelMap(globalCol) < availOut);
+            bool isCellAvail = rowAvail && colAvail;
+
             auto cell = getCellBounds(localRow, localCol);
             bool isConnected = false;
 
@@ -438,14 +493,14 @@ void PatchbayComponent::paint(juce::Graphics& g)
             auto center = cell.getCentre().toFloat();
             bool isHover = (localRow == hoveredRow_ && localCol == hoveredCol_);
 
-            if (currentBank_ == BankView::All_48)
+            if (visibleCount > 16)
             {
                 float radius = isConnected ? (isHover ? 3.5f : 2.5f) : (isHover ? 2.0f : 1.2f);
                 if (isConnected)
                 {
-                    g.setColour(activeColor.withAlpha(0.3f));
+                    g.setColour(activeColor.withAlpha(isCellAvail ? 0.3f : 0.15f));
                     g.fillEllipse(center.x - radius - 1.5f, center.y - radius - 1.5f, (radius + 1.5f) * 2.0f, (radius + 1.5f) * 2.0f);
-                    g.setColour(activeColor);
+                    g.setColour(isCellAvail ? activeColor : activeColor.withAlpha(0.5f));
                     g.fillEllipse(center.x - radius, center.y - radius, radius * 2.0f, radius * 2.0f);
                 }
                 else if (isHover)
@@ -455,7 +510,7 @@ void PatchbayComponent::paint(juce::Graphics& g)
                 }
                 else
                 {
-                    g.setColour(OmniLookAndFeel::getBorder());
+                    g.setColour(OmniLookAndFeel::getBorder().withAlpha(isCellAvail ? 1.0f : 0.35f));
                     g.fillEllipse(center.x - radius, center.y - radius, radius * 2.0f, radius * 2.0f);
                 }
             }
@@ -464,18 +519,18 @@ void PatchbayComponent::paint(juce::Graphics& g)
                 float radius = isConnected ? (isHover ? 6.5f : 5.5f) : (isHover ? 4.0f : 2.5f);
                 if (isConnected)
                 {
-                    g.setColour(activeColor.withAlpha(0.22f));
+                    g.setColour(activeColor.withAlpha(isCellAvail ? 0.22f : 0.1f));
                     g.fillEllipse(center.x - radius - 3.5f, center.y - radius - 3.5f, (radius + 3.5f) * 2.0f, (radius + 3.5f) * 2.0f);
 
-                    g.setColour(activeColor);
+                    g.setColour(isCellAvail ? activeColor : activeColor.withAlpha(0.5f));
                     g.fillEllipse(center.x - radius, center.y - radius, radius * 2.0f, radius * 2.0f);
 
-                    g.setColour(juce::Colours::white);
+                    g.setColour(isCellAvail ? juce::Colours::white : juce::Colours::white.withAlpha(0.5f));
                     g.fillEllipse(center.x - 2.0f, center.y - 2.0f, 4.0f, 4.0f);
                 }
                 else
                 {
-                    g.setColour(isHover ? OmniLookAndFeel::getBorderLight() : OmniLookAndFeel::getBorder());
+                    g.setColour(isHover ? OmniLookAndFeel::getBorderLight() : (isCellAvail ? OmniLookAndFeel::getBorder() : OmniLookAndFeel::getBorder().withAlpha(0.35f)));
                     g.drawEllipse(center.x - radius, center.y - radius, radius * 2.0f, radius * 2.0f, 1.0f);
 
                     if (isHover)
@@ -496,17 +551,23 @@ void PatchbayComponent::paint(juce::Graphics& g)
         juce::String tip = srcLabel + " " + juce::String(gRow) + " -> " + dstLabel + " " + juce::String(gCol);
 
         if (rowsAreInputs)
-            tip += " [IF " + juce::String(matrix_.getInputChannelMap(gRow - 1) + 1) + "]";
+        {
+            int hwIn = matrix_.getInputChannelMap(gRow - 1);
+            tip += (hwIn < availIn) ? (" [IF " + juce::String(hwIn + 1) + "]") : " [NO IN]";
+        }
         if (colsAreOutputs)
-            tip += " [IF " + juce::String(matrix_.getOutputChannelMap(gCol - 1) + 1) + "]";
+        {
+            int hwOut = matrix_.getOutputChannelMap(gCol - 1);
+            tip += (hwOut < availOut) ? (" [IF " + juce::String(hwOut + 1) + "]") : " [NO OUT]";
+        }
 
-        float leftBound = 312.0f;
+        float leftBound = static_cast<float>(btnAudioIfMap_.getRight() + 10);
         float rightBound = modeBadge.getX() - 8.0f;
         float availW = rightBound - leftBound;
 
-        if (availW >= 100.0f)
+        if (availW >= 80.0f)
         {
-            float tipW = std::min(availW, 200.0f);
+            float tipW = std::min(availW, 220.0f);
             float tipX = leftBound + (availW - tipW) * 0.5f;
             auto tipRect = juce::Rectangle<float>(tipX, 8.0f, tipW, 22.0f);
 
@@ -712,12 +773,16 @@ void PatchbayComponent::showInputChannelSelectMenu(int matrixCh)
 
     menu.addSectionHeader("MAP MATRIX IN " + juce::String(matrixCh + 1) + " -> AUDIO INTERFACE");
 
+    int availIn = matrix_.getNumAvailableDawInputs();
     auto createBankMenu = [&](int startHw, int endHw) {
         juce::PopupMenu sub;
         for (int h = startHw; h <= endHw; ++h)
         {
             int hwIdx = h - 1;
-            sub.addItem(100 + h, "Interface Channel " + juce::String(h), true, hwIdx == currentHw);
+            juce::String name = "Interface Channel " + juce::String(h);
+            if (hwIdx < availIn)
+                name += " (Active Host In)";
+            sub.addItem(100 + h, name, true, hwIdx == currentHw);
         }
         return sub;
     };
@@ -781,12 +846,16 @@ void PatchbayComponent::showOutputChannelSelectMenu(int matrixCh)
 
     menu.addSectionHeader("MAP MATRIX OUT " + juce::String(matrixCh + 1) + " -> AUDIO INTERFACE");
 
+    int availOut = matrix_.getNumAvailableDawOutputs();
     auto createBankMenu = [&](int startHw, int endHw) {
         juce::PopupMenu sub;
         for (int h = startHw; h <= endHw; ++h)
         {
             int hwIdx = h - 1;
-            sub.addItem(200 + h, "Interface Channel " + juce::String(h), true, hwIdx == currentHw);
+            juce::String name = "Interface Channel " + juce::String(h);
+            if (hwIdx < availOut)
+                name += " (Active Host Out)";
+            sub.addItem(200 + h, name, true, hwIdx == currentHw);
         }
         return sub;
     };

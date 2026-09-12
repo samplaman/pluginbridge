@@ -86,6 +86,7 @@ private:
     std::string instanceName_ { "Workstation" };
     std::string streamName_ { "Main-LAN" };
     uint16_t audioPort_ { DEFAULT_AUDIO_PORT };
+    int currentStreamChannels_ { 0 };
 
     // Scratch audio buffers for real-time DSP routing
     std::vector<std::vector<float>> netTxBuffers_;

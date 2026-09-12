@@ -164,6 +164,17 @@ void PluginBridgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, 
     if (numFrames <= 0)
         return;
 
+    // Auto-update sender and beacon with actual available channels
+    int availIn = totalInChannels > 0 ? totalInChannels : 2;
+    if (availIn != currentStreamChannels_)
+    {
+        currentStreamChannels_ = availIn;
+        uint16_t chCount = static_cast<uint16_t>(availIn);
+        sender_.setStreamInfo(instanceUuid_, streamName_, static_cast<uint32_t>(getSampleRate()), chCount);
+        beacon_.setInstanceDetails(instanceUuid_, instanceName_, streamName_, audioPort_,
+                                  chCount, static_cast<uint32_t>(getSampleRate()), 0);
+    }
+
     // Update settings from APVTS
     int roleIdx = static_cast<int>(*apvts_.getRawParameterValue("role"));
     int packetFramesIdx = static_cast<int>(*apvts_.getRawParameterValue("packetFrames"));
